@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+.venv
+venv
+web/node_modules
+web/dist
+out
+.env
+.claude
+test_*.py
+*.md
