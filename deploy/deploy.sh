@@ -28,7 +28,8 @@ step "1/6 Project + APIs"
 gcloud config set project "$PROJECT_ID" --quiet
 gcloud services enable run.googleapis.com firestore.googleapis.com \
   aiplatform.googleapis.com cloudscheduler.googleapis.com \
-  secretmanager.googleapis.com cloudbuild.googleapis.com --quiet
+  secretmanager.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com --quiet
 
 step "2/6 Firestore (native mode)"
 if gcloud firestore databases describe --database='(default)' >/dev/null 2>&1; then
