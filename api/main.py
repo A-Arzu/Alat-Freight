@@ -10,6 +10,7 @@ One container does everything on Cloud Run:
   /                         React dashboard (web/dist)
 """
 import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Header, Body
@@ -21,6 +22,15 @@ from data.seed import build_state
 from agent import pipeline
 
 RUN_TOKEN = os.environ.get("RUN_TOKEN", "demo-token")
+
+# short-TTL snapshot cache: the dashboard polls every ~1-2s, and on Firestore
+# each uncached poll costs ~45 document reads
+_cache = {"t": 0.0, "data": None}
+_CACHE_TTL = 1.2
+
+
+def _invalidate():
+    _cache["t"] = 0.0
 
 
 @asynccontextmanager
@@ -48,6 +58,8 @@ def healthz():
 
 @app.get("/api/state")
 def api_state():
+    if _cache["data"] is not None and time.time() - _cache["t"] < _CACHE_TTL:
+        return _cache["data"]
     store = get_store()
     state = store.state()
     state["plans"].sort(key=lambda p: p["generated_at"], reverse=True)
@@ -59,24 +71,38 @@ def api_state():
     scenarios = next((m for m in state["meta"] if m["id"] == "scenarios"), {"items": []})
     state["meta"] = meta
     state["scenarios"] = scenarios["items"]
+    _cache.update(t=time.time(), data=state)
     return state
 
 
 @app.post("/optimize")
-def optimize(x_run_token: str | None = Header(default=None)):
+def optimize(sync: bool = False, x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
-    run_id = pipeline.start_run(get_store(), trigger="manual")
-    return {"run_id": run_id}
+    _invalidate()
+    store = get_store()
+    if sync:  # Cloud Scheduler path: block until the plan is published
+        run_id = pipeline.run_now(store, trigger="schedule")
+        run = store.get("runs", run_id)
+        _invalidate()
+        return {"run_id": run_id, "status": run["status"], "plan_id": run.get("plan_id")}
+    return {"run_id": pipeline.start_run(store, trigger="manual")}
 
 
 @app.post("/events")
-def events(payload: dict = Body(...), x_run_token: str | None = Header(default=None)):
+def events(payload: dict = Body(...), sync: bool = False,
+           x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
     scenario = payload.get("scenario")
     if not scenario:
         raise HTTPException(status_code=422, detail="body must include {'scenario': <key>}")
-    run_id = pipeline.start_run(get_store(), trigger="event", scenario_key=scenario)
-    return {"run_id": run_id}
+    _invalidate()
+    store = get_store()
+    if sync:
+        run_id = pipeline.run_now(store, trigger="event", scenario_key=scenario)
+        run = store.get("runs", run_id)
+        _invalidate()
+        return {"run_id": run_id, "status": run["status"], "plan_id": run.get("plan_id")}
+    return {"run_id": pipeline.start_run(store, trigger="event", scenario_key=scenario)}
 
 
 @app.get("/api/runs/{run_id}")
@@ -103,6 +129,7 @@ def _decide(plan_id: str, action: str, note: str):
     if not plan:
         raise HTTPException(status_code=404, detail="plan not found")
     store.update("plans", plan_id, {"status": action})
+    _invalidate()
     outcome = {"id": f"outcome-{plan_id}-{action}", "plan_id": plan_id,
                "action": action, "note": note,
                "at": pipeline._now_iso(),
@@ -115,6 +142,7 @@ def _decide(plan_id: str, action: str, note: str):
 def seed(x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
     get_store().reset(build_state())
+    _invalidate()
     return {"ok": True, "reseeded": True}
 
 

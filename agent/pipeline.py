@@ -27,15 +27,29 @@ def _now_iso():
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def start_run(store, trigger: str, scenario_key: str | None = None) -> str:
+def _create_run(store, trigger: str, scenario_key: str | None) -> str:
     run_id = f"run-{uuid.uuid4().hex[:8]}"
     run = {"id": run_id, "started_at": _now_iso(), "finished_at": None,
            "status": "running", "trigger": trigger, "scenario": scenario_key,
            "steps": [], "plan_id": None, "planner": None}
     store.upsert("runs", run)
+    return run_id
+
+
+def start_run(store, trigger: str, scenario_key: str | None = None) -> str:
+    """Background run: returns immediately; the dashboard polls the trace."""
+    run_id = _create_run(store, trigger, scenario_key)
     t = threading.Thread(target=execute_run, args=(store, run_id, trigger, scenario_key),
                          daemon=True)
     t.start()
+    return run_id
+
+
+def run_now(store, trigger: str, scenario_key: str | None = None) -> str:
+    """Synchronous run: blocks until done. Used by Cloud Scheduler (sync=true),
+    where a background thread could be CPU-throttled after the response."""
+    run_id = _create_run(store, trigger, scenario_key)
+    execute_run(store, run_id, trigger, scenario_key)
     return run_id
 
 

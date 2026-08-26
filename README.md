@@ -88,6 +88,23 @@ python test_scenarios.py    # all three disruption scenarios
 
 ## Deploy to Google Cloud
 
+**One-shot script** (run from [Cloud Shell](https://shell.cloud.google.com) after cloning, or any machine with the gcloud SDK):
+
+```bash
+bash deploy/deploy.sh YOUR_PROJECT_ID
+```
+
+It enables the APIs, creates Firestore, builds + deploys the Cloud Run service (`--no-cpu-throttling` so background agent runs never stall, 1 GiB RAM), grants the service account `aiplatform.user` + `datastore.user`, and creates the 06:00 Cloud Scheduler job (which calls `/optimize?sync=true` so headless runs complete inside the request). It prints the service URL and your run token.
+
+Then prove the whole story end to end on the cloud — including that **Gemini via ADK** actually planned (not the fallback):
+
+```bash
+bash deploy/verify.sh https://YOUR_SERVICE_URL RUN_TOKEN
+```
+
+<details>
+<summary>Manual steps (what the script does)</summary>
+
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 
@@ -122,7 +139,9 @@ gcloud run services update dispatch-agent --region us-central1 \
   --set-env-vars SMTP_HOST=smtp.gmail.com,SMTP_PORT=465,SMTP_USER=you@gmail.com,EMAIL_TO=dispatcher@example.com
 ```
 
-Then open the `.run.app` URL. Cost guard: the service scales to zero; Gemini calls for a plan cost cents.
+</details>
+
+Then open the `.run.app` URL. Cost guard: the service scales to zero when idle; Gemini calls for a plan cost cents. While recording the demo video, set `--min-instances 1` to kill cold starts (then back to 0). After submitting, `gcloud scheduler jobs pause daily-dispatch --location us-central1`.
 
 ## Environment variables
 
