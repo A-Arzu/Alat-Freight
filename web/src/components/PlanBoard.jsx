@@ -1,8 +1,16 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { hhmm } from '../api'
 
 export default function PlanBoard({ plan, shipments, onDecide }) {
   const cargoOf = Object.fromEntries(shipments.map((s) => [s.id, s.cargo_type]))
+  const [overriding, setOverriding] = useState(false)
+  const [note, setNote] = useState('')
+
+  const submitOverride = () => {
+    onDecide(plan.id, 'override', note.trim())
+    setOverriding(false)
+    setNote('')
+  }
 
   return (
     <section className="panel">
@@ -11,15 +19,33 @@ export default function PlanBoard({ plan, shipments, onDecide }) {
         {plan && <span className="badge v">v{plan.version}</span>}
         {plan && <span className={`badge ${plan.status}`}>{plan.status}</span>}
         <div className="spacer" />
-        {plan && plan.status === 'pending' && (
+        {plan && plan.status === 'pending' && !overriding && (
           <>
             <button className="btn" style={{ padding: '6px 12px', fontSize: 12 }}
-                    onClick={() => onDecide(plan.id, 'override')}>Override</button>
+                    onClick={() => setOverriding(true)}>Override</button>
             <button className="btn primary" style={{ padding: '6px 14px', fontSize: 12 }}
                     onClick={() => onDecide(plan.id, 'approve')}>✓ Approve plan</button>
           </>
         )}
       </div>
+      {overriding && (
+        <div className="override-bar">
+          <label htmlFor="override-note">Why are you overriding? The agent reads this on its next run.</label>
+          <div className="mail-row">
+            <input id="override-note" className="mail-input" autoFocus value={note}
+                   placeholder="e.g. keep W005 free for the 14:00 inspection"
+                   onChange={(e) => setNote(e.target.value)}
+                   onKeyDown={(e) => {
+                     if (e.key === 'Enter') submitOverride()
+                     if (e.key === 'Escape') { setOverriding(false); setNote('') }
+                   }} />
+            <button className="btn" style={{ padding: '7px 12px', fontSize: 12 }}
+                    onClick={() => { setOverriding(false); setNote('') }}>Cancel</button>
+            <button className="btn danger" style={{ padding: '7px 12px', fontSize: 12 }}
+                    onClick={submitOverride}>Record override</button>
+          </div>
+        </div>
+      )}
       <div className="panel-bd">
         {!plan && (
           <div className="trace-empty">

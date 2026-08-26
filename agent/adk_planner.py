@@ -18,6 +18,7 @@ import os
 from agent.prompts import PLANNER_PROMPT
 from agent.tools.prefilter import pairing_table
 from agent.tools.schedule import build_schedule
+from agent.tools.memory import dispatcher_history
 from agent.tools.validate import validate_plan
 from core.models import LOAD_MINUTES
 
@@ -72,6 +73,15 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
               f"{len(scope)} shipments in scope - {len(state['wagons'])} wagons - "
               f"{len(state['ships'])} ships - {len(teams)} dock teams")
         return snap
+
+    def get_dispatcher_history() -> dict:
+        """Recent decisions the human dispatcher made on previous plans: what
+        they approved, what they overrode, and any reason they typed. Use it to
+        calibrate confidence and to say so when you repeat a pairing a
+        dispatcher previously rejected."""
+        decisions, summary = dispatcher_history(state)
+        trace("tool", "get_dispatcher_history", summary)
+        return {"decisions": decisions}
 
     def get_valid_pairings() -> dict:
         """Legal wagon options per shipment after hard-constraint filtering
@@ -171,7 +181,8 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
         name="dispatch_planner",
         model=model_name,
         instruction=PLANNER_PROMPT,
-        tools=[get_dispatch_snapshot, get_valid_pairings, propose_schedule, submit_plan],
+        tools=[get_dispatch_snapshot, get_dispatcher_history, get_valid_pairings,
+               propose_schedule, submit_plan],
     )
 
     async def _run():
@@ -187,7 +198,7 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
                 for part in event.content.parts:
                     text = getattr(part, "text", None)
                     if text and text.strip():
-                        trace("reason", "Gemini reasoning", text.strip()[:400])
+                        trace("reason", "Gemini reasoning", text.strip()[:900])
 
     try:
         asyncio.run(asyncio.wait_for(_run(), timeout=float(os.environ.get("PLANNER_TIMEOUT_S", "150"))))

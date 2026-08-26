@@ -31,7 +31,8 @@ export async function getState() {
 
 export const runOptimize = () => post('/optimize')
 export const injectEvent = (scenario) => post('/events', { scenario })
-export const decidePlan = (planId, action) => post(`/api/plans/${planId}/${action}`)
+export const decidePlan = (planId, action, note) =>
+  post(`/api/plans/${planId}/${action}`, note ? { note } : {})
 export const reseed = () => post('/api/seed')
 export const setRecipient = (recipient) => post('/api/settings/email', { recipient })
 export const sendPlanEmail = (planId, recipient) =>

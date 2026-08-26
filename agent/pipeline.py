@@ -8,7 +8,9 @@ the planner (Gemini via ADK, or the deterministic fallback), validates, then
 publishes the plan + email. A Gemini failure downgrades to the fallback
 planner mid-run instead of failing the demo.
 """
+import json
 import os
+import sys
 import threading
 import time
 import uuid
@@ -30,6 +32,20 @@ def _now_iso():
 # A run whose container died mid-flight would otherwise stay "running" forever
 # and lock the dashboard. Anything older than this is treated as stalled.
 STALE_RUN_MIN = 6
+
+
+def elapsed_seconds(run: dict) -> float:
+    """Wall-clock seconds a run has taken (or is taking, if still in flight)."""
+    try:
+        started = datetime.strptime(run["started_at"], "%Y-%m-%dT%H:%M:%S")
+    except (KeyError, ValueError, TypeError):
+        return 0.0
+    end = run.get("finished_at")
+    try:
+        stop = datetime.strptime(end, "%Y-%m-%dT%H:%M:%S") if end else datetime.now()
+    except (ValueError, TypeError):
+        stop = datetime.now()
+    return max(0.0, round((stop - started).total_seconds(), 1))
 
 
 def is_stale(run: dict) -> bool:
@@ -76,16 +92,39 @@ def run_now(store, trigger: str, scenario_key: str | None = None) -> str:
     return run_id
 
 
+SEVERITY = {"error": "ERROR", "event": "WARNING", "validate": "INFO",
+            "reason": "INFO", "tool": "INFO", "publish": "NOTICE"}
+
+
+def log_structured(**fields):
+    """One JSON line per event. Cloud Run forwards stdout to Cloud Logging,
+    which parses `severity` and exposes the rest as jsonPayload - so the
+    agent's reasoning is queryable, e.g.
+        jsonPayload.component="dispatch-agent" AND jsonPayload.step="reason"
+    """
+    try:
+        print(json.dumps(fields, default=str), flush=True)
+    except Exception:                      # logging must never break a run
+        pass
+
+
 def execute_run(store, run_id: str, trigger: str, scenario_key: str | None = None):
     delay = int(os.environ.get("TRACE_DELAY_MS", "300")) / 1000
     t0 = time.time()
 
     def emit(kind: str, label: str, detail: str = ""):
+        elapsed = round(time.time() - t0, 1)
         run = store.get("runs", run_id)
         steps = run.get("steps", [])
-        steps.append({"t": round(time.time() - t0, 1), "kind": kind,
-                      "label": label, "detail": detail})
+        steps.append({"t": elapsed, "kind": kind, "label": label, "detail": detail})
         store.update("runs", run_id, {"steps": steps})
+        log_structured(
+            severity=SEVERITY.get(kind, "INFO"),
+            message=f"[{label}] {detail}"[:1000],
+            component="dispatch-agent", run_id=run_id, trigger=trigger,
+            scenario=scenario_key, step=kind, label=label,
+            detail=detail[:1000], elapsed_s=elapsed,
+        )
         if delay:
             time.sleep(delay)
 

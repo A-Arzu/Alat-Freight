@@ -6,6 +6,11 @@ Built for the **All Things Agentic Hackathon** (Taskmaster track).
 
 **Gemini 3.5 Flash** · **Google ADK** · **Cloud Run** · **Firestore** · **Cloud Scheduler** · **Secret Manager** · **Cloud Logging**
 
+### ▶ [Try the live dashboard](https://dispatch-agent-ygolewwlkq-uc.a.run.app)
+
+No login. Press **Run agent**, then **Inject disruption → Wagon W003 breakdown**.
+Submission answers: [DEVPOST.md](DEVPOST.md) · Video shot list: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)
+
 ![Architecture](docs/architecture.png)
 
 ---
@@ -22,10 +27,10 @@ And that's the *easy* part. The real test is **10:30 AM, when a wagon fails insp
 2. **Pre-filters in deterministic code**: every physically or legally impossible cargo-wagon pairing is removed *before the model ever sees it* (in the demo dataset: 51 illegal pairings eliminated, 37 legal options remain).
 3. **Reasons with Gemini 3.5 Flash via Google ADK**: the model decides priority order, pairing, and wagon reuse across the day — the soft trade-offs no if-statement can express ("hazmat has one wagon option and a hard cutoff; the perishable has two options and a ship in 3 days — who goes first?").
 4. **Computes times deterministically**: the model proposes an *order*; a gap-aware time-slot engine owns the clock. Gemini can never invent a load window.
-5. **Validates and self-corrects**: the plan is only accepted through a tool-gated `submit_plan` that re-checks every hard constraint; violations bounce back and the agent corrects itself (bounded retries).
+5. **Validates and self-corrects**: the plan is only accepted through a tool-gated `submit_plan` that re-checks every hard constraint; violations bounce back and the agent corrects itself, bounded by the planner timeout.
 6. **Publishes and notifies**: versioned plan to Firestore; formatted HTML email + Excel attachment to the dispatcher; per-assignment confidence and a one-sentence reason on everything.
 7. **Re-plans on disruption**: wagon breakdown, ship cutoff moved, crane fault → deterministic impact analysis finds the affected subset, the agent re-plans *only that*, and publishes **plan v2 with a diff** — moved, retimed, rebooked, completed.
-8. **Keeps a human in command**: the dispatcher approves or overrides in one click; decisions land in an `outcomes` collection.
+8. **Keeps a human in command**: the dispatcher approves, or overrides *with a typed reason*; every decision lands in the Decision log — and the agent reads those decisions back on its next run through `get_dispatcher_history`, lowering confidence on pairings a human previously rejected.
 
 ## Verified results (real runs on Google Cloud)
 
@@ -35,7 +40,7 @@ And that's the *easy* part. The real test is **10:30 AM, when a wagon fails insp
 | Morning plan | 11 loads scheduled, 1 hold (customs), **0 hard-constraint violations** |
 | SLA compliance | 100% (morning) · 91% after wagon breakdown (1 unavoidable rebooking) |
 | Peak dock utilization | 92% |
-| Planning time | **~57 s** vs ~45 min manual baseline |
+| Planning time | **~85 s** vs ~45 min manual baseline (~32× faster) |
 | Disruption response | Plan v2: 1 shipment moved to the recovery reefer (clears its cutoff by 90 min), 1 rebooked to the next sailing, 5 loads recognized as already completed |
 | Automation | Cloud Scheduler fires the 06:00 plan daily with no human involved |
 
@@ -61,7 +66,8 @@ The design principle — **who does what**:
 | **Deterministic Python** (agent tools) | Hard constraints: cargo-type rules, certifications, capacity, reservations, cold-chain windows, calendars, cutoff math | An LLM must never be able to break physics or law. It only ever sees *legal* options, and its output is re-validated anyway. |
 | **Gemini 3.5 Flash** (via Google ADK) | Soft trade-offs: priority ordering, pairing choice, wagon-reuse strategy, disruption recovery, per-assignment confidence + reason | There is no if-statement for competing priorities under scarcity. |
 | **`propose_schedule` tool** | Turning the model's chosen *order* into concrete times | The model decides sequence; the engine owns the clock. Gemini iterates: propose → see conflicts → reorder. |
-| **`submit_plan` tool** | The only door out | Illegal plans bounce back with named violations; the agent self-corrects (≤2 retries). |
+| **`submit_plan` tool** | The only door out | Illegal plans bounce back with named violations and the agent self-corrects, bounded by the 150 s planner timeout (`PLANNER_TIMEOUT_S`). |
+| **`get_dispatcher_history` tool** | Memory | Recent approve/override decisions — including the reason a dispatcher typed — so the agent can lower confidence on a pairing a human previously rejected and say so. |
 | **Automatic fallback** | Demo resilience | If Vertex AI is unreachable, a deterministic heuristic runs the same tools; the UI labels it honestly (`PLANNER: FALLBACK`). |
 | **Human dispatcher** | Approve / override | Confidence scores and rebookings are flagged; decisions accumulate in `outcomes`. |
 
@@ -78,6 +84,7 @@ flowchart LR
         API["FastAPI<br/>/optimize · /events · /api/*"]
         subgraph AGENT["Google ADK · LlmAgent"]
             T1["tool: get_dispatch_snapshot"]
+            T5["tool: get_dispatcher_history<br/>past approve/override decisions"]
             T2["tool: get_valid_pairings<br/>hard-constraint filter"]
             T3["tool: propose_schedule<br/>time-slot engine"]
             T4["tool: submit_plan<br/>validate + persist + notify"]
@@ -94,6 +101,7 @@ flowchart LR
     API --> AGENT
     AGENT <-->|"reasoning + tool calls"| GEM
     T1 -->|"read state"| FS
+    T5 -->|"read past decisions"| FS
     T4 -->|"write plan vN + diff"| FS
     T4 -->|"send plan"| DIS
     T4 -.->|"secrets"| SM
@@ -109,7 +117,7 @@ flowchart LR
 
 ```
 agent/                the agent
-  adk_planner.py        Gemini LlmAgent + function tools (snapshot / pairings / schedule / submit)
+  adk_planner.py        Gemini LlmAgent + tools (snapshot / history / pairings / schedule / submit)
   mock_planner.py       deterministic fallback - same tools, transparent scoring
   pipeline.py           run orchestration: trigger -> planner -> validate -> publish -> notify
   prompts.py            planner instruction (objectives, capacity facts, workflow, output contract)
@@ -195,7 +203,7 @@ Cost guard: everything scales to zero when idle; a full Gemini planning run cost
 | `POST /api/seed` | Reset the demo dataset (keeps the chosen recipient). |
 | `GET /api/health` | Health probe (`/healthz` exists too but Cloud Run's frontend reserves that path — see learnings). |
 
-**Auth.** Mutating endpoints require an `X-Run-Token` header and accept two values: `RUN_TOKEN` (secret, used by Cloud Scheduler) and a UI token derived from it as `sha256(RUN_TOKEN + "|dashboard")[:24]`, which the dashboard reads from `/api/state`. The public dashboard therefore drives the demo without the Scheduler's token ever reaching the browser, and without a build-time constant that can drift from the deployed service. Run and email endpoints are additionally rate-limited (40 runs/hour, 25 sends/hour) so a public URL can't burn Gemini quota or become a mail relay.
+**Auth.** Mutating endpoints require an `X-Run-Token` header and accept two values: `RUN_TOKEN` (secret, used by Cloud Scheduler) and a UI token derived from it as `sha256(RUN_TOKEN + "|dashboard")[:24]`, which the dashboard reads from `/api/state`. The public dashboard therefore drives the demo without the Scheduler's token ever reaching the browser, and without a build-time constant that can drift from the deployed service. Run, email and seed endpoints are additionally rate-limited **per caller** (60 runs/hour, 25 sends/hour, 60 seeds/hour) so a public URL can't burn Gemini quota or become a mail relay — and one visitor can never lock out the operator.
 
 ## Environment variables
 

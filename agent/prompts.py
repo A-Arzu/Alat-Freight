@@ -27,6 +27,10 @@ WORKFLOW - follow exactly:
 1. Call get_dispatch_snapshot to see shipments, wagons, ships, teams and the port clock.
 2. Call get_valid_pairings. You may ONLY pair a shipment with wagons listed there, and
    only options marked usable=true. Never invent wagons, teams, or times.
+2b. Call get_dispatcher_history to see how the human dispatcher judged your previous plans.
+   This is advisory, not a constraint: still choose the best option on today's facts. But if
+   you are about to repeat a pairing a dispatcher overrode, keep it only if it remains the
+   best choice, lower its confidence, and name the prior override in the reason.
 3. Decide the loading order and wagon per shipment. Reason about trade-offs explicitly
    (scarcity, SLA tier, cutoff slack, cold-chain windows, dwell).
 4. Call propose_schedule with your ordered picks. It returns concrete load windows and any

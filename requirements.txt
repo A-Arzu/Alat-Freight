@@ -1,7 +1,9 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.7
-openpyxl>=3.1
-google-adk>=1.14
-google-genai>=1.16
-google-cloud-firestore>=2.19
+# Upper bounds pin the majors that were verified end-to-end on Cloud Run, so a
+# rebuild the day before judging cannot pull a breaking release.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.7,<3.0
+openpyxl>=3.1,<4.0
+google-adk>=1.14,<3.0
+google-genai>=1.16,<3.0
+google-cloud-firestore>=2.19,<3.0

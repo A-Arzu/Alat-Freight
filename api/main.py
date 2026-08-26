@@ -119,6 +119,9 @@ def api_state():
     for run in state["runs"]:             # never let a dead run lock the UI
         if pipeline.is_stale(run):
             run["status"] = "stalled"
+        # server-side elapsed: the browser cannot trust its own clock against
+        # the container's, and the UI needs a live timer during a ~85s run
+        run["elapsed_s"] = pipeline.elapsed_seconds(run)
     meta = next((m for m in state["meta"] if m["id"] == "meta"), {})
     scenarios = next((m for m in state["meta"] if m["id"] == "scenarios"), {"items": []})
     state["meta"] = meta

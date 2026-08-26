@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: agent + api tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install runtime deps
+        run: pip install fastapi "uvicorn[standard]" "pydantic>=2.7" openpyxl
+      - name: Story arc (plan -> disruption -> recovery)
+        run: python test_pipeline.py
+      - name: All disruption scenarios
+        run: python test_scenarios.py
+      - name: Email delivery (validation, SSL, STARTTLS, failure)
+        run: python test_email.py
+      - name: Hardening regressions
+        run: python test_hardening.py
+      - name: API smoke test
+        run: |
+          STORE=memory PLANNER=mock TRACE_DELAY_MS=0 RUN_TOKEN=ci-token \
+            python -m uvicorn api.main:app --port 8000 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/api/health && break; sleep 1; done
+          curl -sf -X POST localhost:8000/optimize?sync=true -H 'X-Run-Token: ci-token' -d ''
+          curl -sf -X POST localhost:8000/events?sync=true -H 'X-Run-Token: ci-token' \
+            -H 'Content-Type: application/json' -d '{"scenario":"wagon_breakdown"}'
+          curl -sf localhost:8000/api/state | python -c "
+          import sys, json
+          s = json.load(sys.stdin)
+          plan = s['plans'][0]
+          assert plan['version'] == 2, plan['version']
+          assert plan['assignments'], 'no assignments'
+          assert any(d['kind'] != 'completed' for d in plan['diff']), 'no diff entries'
+          print('API smoke OK:', plan['id'], len(plan['assignments']), 'loads')
+          "
+
+  frontend:
+    name: dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-fund --no-audit
+        working-directory: web
+      - run: npm run build
+        working-directory: web

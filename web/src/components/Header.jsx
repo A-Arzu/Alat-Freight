@@ -58,7 +58,8 @@ export default function Header({ meta, run, plan, scenarios, busy, running, offl
             </div>
           )}
         </div>
-        <button className="btn primary" onClick={onRun} disabled={busy || running}>
+        <button className={`btn primary ${!hasPlan && !running && !busy ? 'attention' : ''}`}
+                onClick={onRun} disabled={busy || running}>
           <span className="ico">▶</span> {running ? 'Agent running…' : 'Run agent'}
         </button>
       </div>

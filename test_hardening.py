@@ -93,4 +93,24 @@ except pydantic.ValidationError:
     pass                                  # hence the clamp in adk_planner.submit_plan
 print("plan schema rejects out-of-range priority: OK (clamped upstream)")
 
+# ---- 6. the agent's memory of human judgement --------------------------
+from agent.tools.memory import dispatcher_history
+
+empty, summary = dispatcher_history({"outcomes": [], "plans": []})
+assert empty == [] and "no prior dispatcher decisions" in summary
+
+plan_id = store.all("plans")[0]["id"]
+store.upsert("outcomes", {"id": "o1", "plan_id": plan_id, "action": "approved",
+                          "note": "", "at": "2026-08-26T08:00:00"})
+store.upsert("outcomes", {"id": "o2", "plan_id": plan_id, "action": "overridden",
+                          "note": "Keep W005 free for the 14:00 crane inspection",
+                          "at": "2026-08-26T09:30:00"})
+decisions, summary = dispatcher_history(store.state())
+assert len(decisions) == 2, decisions
+assert decisions[0]["action"] == "overridden", "newest decision must come first"
+assert decisions[0]["pairings"], "the agent must see which pairings were judged"
+assert "1 approved, 1 overridden" in summary, summary
+assert "crane inspection" in summary, "the human's reason must reach the agent"
+print(f"dispatcher memory: OK ({summary[:70]}…)")
+
 print("\nALL HARDENING TESTS PASSED")

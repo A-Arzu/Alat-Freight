@@ -67,5 +67,9 @@ echo "VERIFIED. Video proof points:"
 echo "  - dashboard:      ${URL}"
 echo "  - Cloud Run:      console.cloud.google.com/run  (service + invocations graph)"
 echo "  - Firestore:      console.cloud.google.com/firestore  (dispatch_plans, dispatch_runs)"
-echo "  - Cloud Logging:  the agent's step trace"
 echo "  - Scheduler:      console.cloud.google.com/cloudscheduler  (daily-dispatch job)"
+echo "  - Cloud Logging:  paste this into Logs Explorer to see the agent reason server-side:"
+echo
+echo '      jsonPayload.component="dispatch-agent"'
+echo
+echo "    (add  AND jsonPayload.step=\"reason\"  for just the reasoning steps)"

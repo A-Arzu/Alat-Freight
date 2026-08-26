@@ -58,6 +58,11 @@ def get_dispatch_snapshot() -> dict:
     return {"shipments": len(shipments)}
 
 
+def get_dispatcher_history() -> dict:
+    """Recent human approve/override decisions."""
+    return {"decisions": []}
+
+
 def get_valid_pairings() -> dict:
     """Legal wagon options per shipment."""
     return {"pairings": {}}
@@ -77,8 +82,10 @@ agent = LlmAgent(
     name="dispatch_planner",
     model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     instruction=PLANNER_PROMPT,
-    tools=[get_dispatch_snapshot, get_valid_pairings, propose_schedule, submit_plan],
+    tools=[get_dispatch_snapshot, get_dispatcher_history, get_valid_pairings,
+           propose_schedule, submit_plan],
 )
+assert len(agent.tools) == 5, agent.tools
 print(f"LlmAgent constructed: {agent.name}, model={agent.model}, tools={len(agent.tools)}")
 
 # ---- 3. Runner + session service wire up --------------------------------

@@ -12,6 +12,7 @@ import Fleet from './components/Fleet.jsx'
 import Ships from './components/Ships.jsx'
 import Events from './components/Events.jsx'
 import EmailPanel from './components/EmailPanel.jsx'
+import Outcomes from './components/Outcomes.jsx'
 
 export default function App() {
   const [state, setState] = useState(null)
@@ -102,7 +103,7 @@ export default function App() {
         <div className="stack">
           <ErrorBoundary name="Dispatch plan" resetKey={key}>
             <PlanBoard plan={plan} shipments={state.shipments}
-                       onDecide={(id, action) => act(() => decidePlan(id, action))} />
+                       onDecide={(id, action, note) => act(() => decidePlan(id, action, note))} />
           </ErrorBoundary>
           {plan?.diff?.length > 0 && (
             <ErrorBoundary name="What changed" resetKey={key}>
@@ -113,6 +114,9 @@ export default function App() {
         <div className="stack">
           <ErrorBoundary name="Agent activity" resetKey={key}><AgentPanel run={run} /></ErrorBoundary>
           <ErrorBoundary name="Disruption feed" resetKey={key}><Events events={state.events} /></ErrorBoundary>
+          <ErrorBoundary name="Decision log" resetKey={key}>
+            <Outcomes plans={state.plans} outcomes={state.outcomes} runs={state.runs} />
+          </ErrorBoundary>
         </div>
       </div>
 
