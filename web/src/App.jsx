@@ -66,7 +66,8 @@ export default function App() {
         <div className="grid tri">
           <Fleet wagons={state.wagons} plan={plan} meta={state.meta} />
           <Ships ships={state.ships} plan={plan} meta={state.meta} />
-          <EmailPanel email={state.emails[0]} />
+          <EmailPanel email={state.emails[0]} settings={state.email_settings}
+                      planId={plan?.id} onRefresh={refresh} />
         </div>
       </div>
       <div className="footer">

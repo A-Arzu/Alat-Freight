@@ -17,10 +17,10 @@ SERVICE="${SERVICE:-dispatch-agent}"
 gcloud config set project "$PROJECT_ID" --quiet >/dev/null
 
 read -rp  "Gmail address that SENDS the plan (SMTP_USER): " SMTP_USER
-read -rp  "Recipient inbox for dispatch plans (EMAIL_TO): " EMAIL_TO
+read -rp  "Default recipient [optional - pick one in the dashboard instead]: " EMAIL_TO
 read -rsp "Gmail App Password (input hidden; spaces are OK): " APP_PASS; echo
 APP_PASS="${APP_PASS// /}"   # Google displays app passwords with spaces - strip them
-[[ -n "$APP_PASS" && -n "$SMTP_USER" && -n "$EMAIL_TO" ]] || { echo "missing input" >&2; exit 1; }
+[[ -n "$APP_PASS" && -n "$SMTP_USER" ]] || { echo "missing input" >&2; exit 1; }
 
 if gcloud secrets describe smtp-pass >/dev/null 2>&1; then
   printf '%s' "$APP_PASS" | gcloud secrets versions add smtp-pass --data-file=- >/dev/null
@@ -37,18 +37,22 @@ gcloud secrets add-iam-policy-binding smtp-pass \
   --member="serviceAccount:${SA}" --role=roles/secretmanager.secretAccessor --quiet >/dev/null
 echo "granted secretAccessor to ${SA}"
 
+ENV_VARS="SMTP_HOST=smtp.gmail.com,SMTP_PORT=465,SMTP_USER=${SMTP_USER}"
+[[ -n "$EMAIL_TO" ]] && ENV_VARS="${ENV_VARS},EMAIL_TO=${EMAIL_TO}"
 gcloud run services update "$SERVICE" --region "$REGION" \
   --set-secrets "SMTP_PASS=smtp-pass:latest" \
-  --update-env-vars "SMTP_HOST=smtp.gmail.com,SMTP_PORT=465,SMTP_USER=${SMTP_USER},EMAIL_TO=${EMAIL_TO}" \
-  --quiet
+  --update-env-vars "$ENV_VARS" --quiet
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
 
 cat <<EOF
 
 Email delivery configured.
-Test it (uses your saved run token):
-  curl -sS -X POST "${URL}/optimize?sync=true" -H "X-Run-Token: YOUR_TOKEN" -d ''
-Then check ${EMAIL_TO} - the first email may land in spam; mark it "not spam"
-before recording the demo. The dashboard's Dispatcher Delivery panel will now
-show "email sent" instead of "rendered".
+
+Pick the recipient in the dashboard - the "Dispatcher delivery" panel has a
+"Send plans to" field: type an address, press Save (every future plan goes
+there) or Send now (emails the current plan immediately).
+
+  ${URL}
+
+The first message can land in spam - mark it "not spam" before recording.
 EOF

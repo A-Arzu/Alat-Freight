@@ -1,16 +1,26 @@
 """FastAPI service: agent endpoints + dashboard API + static frontend.
 
 One container does everything on Cloud Run:
-  POST /optimize            morning batch plan   (Cloud Scheduler / dashboard)
-  POST /events              disruption -> incremental re-plan
-  GET  /api/state           full snapshot for the dashboard (polled)
-  GET  /api/runs/{id}       live step trace of one agent run
-  POST /api/plans/{id}/approve | /override      human-in-the-loop
-  POST /api/seed            reset the demo dataset
-  /                         React dashboard (web/dist)
+  POST /optimize                 morning batch plan   (Cloud Scheduler / dashboard)
+  POST /events                   disruption -> incremental re-plan
+  GET  /api/state                full snapshot for the dashboard (polled)
+  GET  /api/runs/{id}            live step trace of one agent run
+  POST /api/plans/{id}/approve | /override    human-in-the-loop
+  POST /api/plans/{id}/email     (re)send a plan to a chosen recipient
+  POST /api/settings/email       set the dispatcher recipient at runtime
+  POST /api/seed                 reset the demo dataset
+  /                              React dashboard (web/dist)
+
+Auth: mutating endpoints need an X-Run-Token header. Two tokens are accepted -
+RUN_TOKEN (kept secret, used by Cloud Scheduler) and a UI token derived from it,
+which the dashboard reads from /api/state. The dashboard is public by design, so
+the UI token is not a secret; deriving it keeps the Scheduler's token off the wire
+while still letting the browser drive the demo.
 """
+import hashlib
 import os
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Header, Body
@@ -20,17 +30,36 @@ from fastapi.staticfiles import StaticFiles
 from core.store import get_store
 from data.seed import build_state
 from agent import pipeline
+from agent.tools import notify
 
 RUN_TOKEN = os.environ.get("RUN_TOKEN", "demo-token")
+UI_TOKEN = hashlib.sha256(f"{RUN_TOKEN}|dashboard".encode()).hexdigest()[:24]
 
 # short-TTL snapshot cache: the dashboard polls every ~1-2s, and on Firestore
 # each uncached poll costs ~45 document reads
 _cache = {"t": 0.0, "data": None}
 _CACHE_TTL = 1.2
 
+# generous guard rails on a public endpoint: stop a runaway loop or a scraper
+# from burning Gemini quota or turning the mailer into a spam relay
+_limits = {"run": deque(), "email": deque()}
+_LIMITS = {"run": (40, 3600), "email": (25, 3600)}
+
 
 def _invalidate():
     _cache["t"] = 0.0
+
+
+def _rate_limit(bucket: str):
+    cap, window = _LIMITS[bucket]
+    now = time.time()
+    stamps = _limits[bucket]
+    while stamps and now - stamps[0] > window:
+        stamps.popleft()
+    if len(stamps) >= cap:
+        raise HTTPException(status_code=429,
+                            detail=f"rate limit: max {cap} {bucket} requests per hour")
+    stamps.append(now)
 
 
 @asynccontextmanager
@@ -47,7 +76,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 
 
 def _check(token: str | None):
-    if token != RUN_TOKEN:
+    if token not in (RUN_TOKEN, UI_TOKEN):
         raise HTTPException(status_code=401, detail="bad or missing X-Run-Token")
 
 
@@ -76,6 +105,14 @@ def api_state():
     scenarios = next((m for m in state["meta"] if m["id"] == "scenarios"), {"items": []})
     state["meta"] = meta
     state["scenarios"] = scenarios["items"]
+    state["ui_token"] = UI_TOKEN
+    recipients = notify.resolve_recipients(meta)
+    state["email_settings"] = {
+        "recipient": ", ".join(recipients),
+        "smtp_configured": notify.smtp_configured(),
+        "source": ("dashboard" if meta.get("email_to")
+                   else "env" if os.environ.get("EMAIL_TO") else "unset"),
+    }
     _cache.update(t=time.time(), data=state)
     return state
 
@@ -83,6 +120,7 @@ def api_state():
 @app.post("/optimize")
 def optimize(sync: bool = False, x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
+    _rate_limit("run")
     _invalidate()
     store = get_store()
     if sync:  # Cloud Scheduler path: block until the plan is published
@@ -100,6 +138,7 @@ def events(payload: dict = Body(...), sync: bool = False,
     scenario = payload.get("scenario")
     if not scenario:
         raise HTTPException(status_code=422, detail="body must include {'scenario': <key>}")
+    _rate_limit("run")
     _invalidate()
     store = get_store()
     if sync:
@@ -118,13 +157,62 @@ def get_run(run_id: str):
     return run
 
 
+@app.post("/api/settings/email")
+def set_email_recipient(payload: dict = Body(default={}),
+                        x_run_token: str | None = Header(default=None)):
+    """Choose who receives dispatch plans, from the dashboard, at runtime."""
+    _check(x_run_token)
+    raw = str(payload.get("recipient", "")).strip()
+    store = get_store()
+    if not raw:
+        store.update("meta", "meta", {"email_to": None})
+        _invalidate()
+        return {"ok": True, "recipient": "", "cleared": True}
+    try:
+        addresses = notify.parse_recipients(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    value = ", ".join(addresses)
+    store.update("meta", "meta", {"email_to": value})
+    _invalidate()
+    return {"ok": True, "recipient": value,
+            "smtp_configured": notify.smtp_configured()}
+
+
+@app.post("/api/plans/{plan_id}/email")
+def email_plan(plan_id: str, payload: dict = Body(default={}),
+               x_run_token: str | None = Header(default=None)):
+    """(Re)send an existing plan - optionally to a one-off recipient."""
+    _check(x_run_token)
+    _rate_limit("email")
+    store = get_store()
+    plan = store.get("plans", plan_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="plan not found")
+    override = str(payload.get("recipient", "")).strip() or None
+    if override:
+        try:
+            notify.parse_recipients(override)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    meta = store.get("meta", "meta") or {}
+    record = notify.send_dispatch_email(plan, meta, store, recipient=override)
+    _invalidate()
+    return {"ok": True, "delivered": record["delivered"], "to": record["to"],
+            "error": record.get("error"), "attachment": record.get("attachment")}
+
+
 @app.post("/api/plans/{plan_id}/approve")
-def approve(plan_id: str, payload: dict = Body(default={})):
+def approve(plan_id: str, payload: dict = Body(default={}),
+            x_run_token: str | None = Header(default=None)):
+    _check(x_run_token)
     return _decide(plan_id, "approved", payload.get("note", ""))
 
 
 @app.post("/api/plans/{plan_id}/override")
-def override(plan_id: str, payload: dict = Body(default={})):
+def override(plan_id: str, payload: dict = Body(default={}),
+             x_run_token: str | None = Header(default=None)):
+    _check(x_run_token)
     return _decide(plan_id, "overridden", payload.get("note", ""))
 
 
@@ -136,7 +224,7 @@ def _decide(plan_id: str, action: str, note: str):
     store.update("plans", plan_id, {"status": action})
     _invalidate()
     outcome = {"id": f"outcome-{plan_id}-{action}", "plan_id": plan_id,
-               "action": action, "note": note,
+               "action": action, "note": str(note)[:500],
                "at": pipeline._now_iso(),
                "planner": plan.get("planner"), "version": plan.get("version")}
     store.upsert("outcomes", outcome)
@@ -145,8 +233,13 @@ def _decide(plan_id: str, action: str, note: str):
 
 @app.post("/api/seed")
 def seed(x_run_token: str | None = Header(default=None)):
+    """Reset the demo dataset. The chosen email recipient survives a reseed."""
     _check(x_run_token)
-    get_store().reset(build_state())
+    store = get_store()
+    keep = (store.get("meta", "meta") or {}).get("email_to")
+    store.reset(build_state())
+    if keep:
+        store.update("meta", "meta", {"email_to": keep})
     _invalidate()
     return {"ok": True, "reseeded": True}
 

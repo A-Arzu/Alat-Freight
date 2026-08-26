@@ -1,11 +1,14 @@
 """Dispatcher notification: HTML email + XLSX attachment.
 
-Sends over SMTP when configured (SMTP_HOST/SMTP_USER/SMTP_PASS/EMAIL_TO,
-e.g. Gmail app password with the password in Secret Manager on Cloud Run).
-Always records the rendered email in the store so the dashboard can show
-the deliverable even without SMTP.
+Recipients are chosen at runtime from the dashboard (stored in the Firestore
+meta document) and fall back to the EMAIL_TO env var. Mail goes out over SMTP
+when credentials are configured (SMTP_HOST/SMTP_USER/SMTP_PASS, e.g. a Gmail
+app password held in Secret Manager on Cloud Run). The rendered email is always
+recorded in the store, so the dashboard can show the deliverable even with no
+SMTP configured at all.
 """
 import os
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -16,6 +19,40 @@ from core.clock import hhmm
 
 PRIORITY_LABEL = {1: "P1 - URGENT", 2: "P2 - LOAD ASAP", 3: "P3 - TODAY"}
 PRIORITY_COLOR = {1: "#d64545", 2: "#d69a2e", 3: "#3a7bd5"}
+
+EMAIL_RE = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[A-Za-z]{2,}$")
+MAX_RECIPIENTS = 5
+
+
+def parse_recipients(raw: str, limit: int = MAX_RECIPIENTS) -> list[str]:
+    """Validate a comma/semicolon separated recipient list.
+
+    Raises ValueError with a message meant to be shown to the user.
+    """
+    parts = [p.strip() for p in re.split(r"[,;]", raw or "") if p.strip()]
+    if not parts:
+        raise ValueError("Enter an email address.")
+    if len(parts) > limit:
+        raise ValueError(f"At most {limit} recipients.")
+    for p in parts:
+        if len(p) > 254 or not EMAIL_RE.match(p):
+            raise ValueError(f"'{p}' is not a valid email address.")
+    return parts
+
+
+def smtp_configured() -> bool:
+    return all(os.environ.get(k) for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS"))
+
+
+def resolve_recipients(meta: dict | None, override: str | None = None) -> list[str]:
+    """Runtime setting wins, then the stored dashboard setting, then env."""
+    for candidate in (override, (meta or {}).get("email_to"), os.environ.get("EMAIL_TO")):
+        if candidate and str(candidate).strip():
+            try:
+                return parse_recipients(str(candidate))
+            except ValueError:
+                continue
+    return []
 
 
 def build_email_html(plan: dict, meta: dict) -> str:
@@ -103,24 +140,42 @@ def build_xlsx(plan: dict, path: str) -> str | None:
     return path
 
 
-def send_dispatch_email(plan: dict, meta: dict, store, out_dir: str = "out") -> dict:
+def _deliver(msg, user: str) -> None:
+    """Port 465 = implicit SSL (Gmail default); anything else = STARTTLS."""
+    host = os.environ["SMTP_HOST"]
+    port = int(os.environ.get("SMTP_PORT", "465"))
+    password = os.environ["SMTP_PASS"]
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.starttls()
+            smtp.login(user, password)
+            smtp.send_message(msg)
+
+
+def send_dispatch_email(plan: dict, meta: dict, store, out_dir: str = "out",
+                        recipient: str | None = None) -> dict:
+    """Render the plan email (+ XLSX), send it if SMTP is configured, and record it."""
     subject = (f"{'UPDATED ' if plan['version'] > 1 else ''}Dispatch Plan {plan['plan_date']} "
                f"v{plan['version']} | {len(plan['assignments'])} loads, "
                f"{len(plan.get('holds', []))} on hold")
     html = build_email_html(plan, meta)
+    to_list = resolve_recipients(meta, recipient)
 
     os.makedirs(out_dir, exist_ok=True)
     xlsx_path = build_xlsx(plan, os.path.join(out_dir, f"dispatch_plan_{plan['id']}.xlsx"))
 
-    host = os.environ.get("SMTP_HOST")
-    user = os.environ.get("SMTP_USER")
-    pwd = os.environ.get("SMTP_PASS")
-    to = os.environ.get("EMAIL_TO")
-    delivered = False
-    if host and user and pwd and to:
+    delivered, error = False, None
+    if to_list and smtp_configured():
+        user = os.environ["SMTP_USER"]
         try:
             msg = MIMEMultipart()
-            msg["Subject"], msg["From"], msg["To"] = subject, user, to
+            msg["Subject"] = subject
+            msg["From"] = user
+            msg["To"] = ", ".join(to_list)
             msg.attach(MIMEText(html, "html"))
             if xlsx_path:
                 with open(xlsx_path, "rb") as f:
@@ -130,12 +185,15 @@ def send_dispatch_email(plan: dict, meta: dict, store, out_dir: str = "out") -> 
                 part.add_header("Content-Disposition",
                                 f"attachment; filename={os.path.basename(xlsx_path)}")
                 msg.attach(part)
-            with smtplib.SMTP_SSL(host, int(os.environ.get("SMTP_PORT", "465"))) as smtp:
-                smtp.login(user, pwd)
-                smtp.send_message(msg)
+            _deliver(msg, user)
             delivered = True
-        except Exception as exc:  # demo must never die on mail problems
-            print(f"[notify] SMTP send failed: {exc}")
+        except Exception as exc:            # a mail problem must never kill a run
+            error = f"{type(exc).__name__}: {exc}"[:200]
+            print(f"[notify] SMTP send failed: {error}")
+    elif not to_list:
+        error = "no recipient set"
+    else:
+        error = "SMTP not configured"
 
     record = {
         "id": f"email-{plan['id']}",
@@ -143,8 +201,10 @@ def send_dispatch_email(plan: dict, meta: dict, store, out_dir: str = "out") -> 
         "subject": subject,
         "html": html,
         "attachment": os.path.basename(xlsx_path) if xlsx_path else None,
-        "to": to or "dispatcher (SMTP not configured - logged only)",
+        "to": ", ".join(to_list) if to_list else "(no recipient set)",
+        "recipients": to_list,
         "delivered": delivered,
+        "error": error,
         "created_at": plan["generated_at"],
     }
     store.upsert("emails", record)

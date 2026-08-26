@@ -1,38 +1,41 @@
-const TOKEN = import.meta.env.VITE_RUN_TOKEN || 'demo-token'
+// The dashboard authenticates mutating calls with a UI token the server hands
+// out in /api/state. That keeps the Cloud Scheduler token off the wire and,
+// unlike a build-time constant, always matches whatever the service is running.
+let uiToken = import.meta.env.VITE_RUN_TOKEN || 'demo-token'
+
+async function post(path, body) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'X-Run-Token': uiToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    })
+    let data = null
+    try { data = await r.json() } catch { /* empty or non-JSON body */ }
+    if (!r.ok) {
+      return { ok: false, error: (data && (data.detail || data.error)) || `request failed (${r.status})` }
+    }
+    return { ok: true, ...(data || {}) }
+  } catch {
+    return { ok: false, error: 'cannot reach the dispatch service' }
+  }
+}
 
 export async function getState() {
   const r = await fetch('/api/state')
   if (!r.ok) throw new Error('state fetch failed')
-  return r.json()
+  const state = await r.json()
+  if (state.ui_token) uiToken = state.ui_token
+  return state
 }
 
-export async function runOptimize() {
-  const r = await fetch('/optimize', { method: 'POST', headers: { 'X-Run-Token': TOKEN } })
-  return r.json()
-}
-
-export async function injectEvent(scenario) {
-  const r = await fetch('/events', {
-    method: 'POST',
-    headers: { 'X-Run-Token': TOKEN, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenario }),
-  })
-  return r.json()
-}
-
-export async function decidePlan(planId, action) {
-  const r = await fetch(`/api/plans/${planId}/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  })
-  return r.json()
-}
-
-export async function reseed() {
-  const r = await fetch('/api/seed', { method: 'POST', headers: { 'X-Run-Token': TOKEN } })
-  return r.json()
-}
+export const runOptimize = () => post('/optimize')
+export const injectEvent = (scenario) => post('/events', { scenario })
+export const decidePlan = (planId, action) => post(`/api/plans/${planId}/${action}`)
+export const reseed = () => post('/api/seed')
+export const setRecipient = (recipient) => post('/api/settings/email', { recipient })
+export const sendPlanEmail = (planId, recipient) =>
+  post(`/api/plans/${planId}/email`, recipient ? { recipient } : {})
 
 // ---- time helpers (naive ISO "YYYY-MM-DDTHH:MM") ----
 export const hhmm = (s) => (s ? s.slice(11, 16) : '--:--')

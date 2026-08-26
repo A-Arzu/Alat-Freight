@@ -140,6 +140,7 @@ Open http://localhost:8000 — seed data loads automatically. Press **Run agent*
 ```bash
 python test_pipeline.py     # full story arc + assertions
 python test_scenarios.py    # all three disruption scenarios
+python test_email.py        # recipient validation, precedence, SMTP send/failure paths
 python test_adk_wiring.py   # ADK agent/tool construction (pip install google-adk)
 ```
 
@@ -159,13 +160,15 @@ It enables the APIs (Run, Firestore, Vertex AI, Scheduler, Secret Manager, Cloud
 bash deploy/verify.sh https://YOUR_SERVICE_URL RUN_TOKEN
 ```
 
-**Email delivery (Gmail)** — interactive; the app password is hidden-input and goes only to Secret Manager:
+**Email delivery (Gmail)** — interactive; the app password is hidden-input and goes only to Secret Manager, never into env vars or shell history:
 
 ```bash
 bash deploy/email_setup.sh
 ```
 
-(Create the app password first at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) — requires 2-Step Verification. Without email configured, the plan email + XLSX still render in the dashboard's Delivery panel.)
+Create the app password first at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (requires 2-Step Verification). Port 465 uses implicit SSL; set `SMTP_PORT=587` and the sender switches to STARTTLS.
+
+**Choosing the recipient — at runtime, in the app.** The dashboard's *Dispatcher delivery* panel has a **Send plans to** field: type an address and press **Save** (every future plan, including the 06:00 scheduled run, goes there) or **Send now** (emails the current plan immediately). Addresses are validated server-side, up to 5 comma-separated recipients are allowed, and the setting survives a demo reseed. Precedence is *one-off override → dashboard setting → `EMAIL_TO` env var*, so `EMAIL_TO` is only an optional fallback. With no SMTP configured at all, plans still render (with the XLSX) in that same panel.
 
 **Demo-recording tips**
 
@@ -186,10 +189,12 @@ Cost guard: everything scales to zero when idle; a full Gemini planning run cost
 | `GET /api/state` | Full snapshot: fleet, ships, plans, runs, events, emails (1.2 s cache). |
 | `GET /api/runs/{id}` | Live step trace of one agent run. |
 | `POST /api/plans/{id}/approve` · `/override` | Human-in-the-loop decision → `outcomes`. |
-| `POST /api/seed` | Reset the demo dataset. |
+| `POST /api/settings/email` `{"recipient": "..."}` | Set (or clear) the dispatch-plan recipient at runtime. |
+| `POST /api/plans/{id}/email` `{"recipient"?: "..."}` | (Re)send a plan, optionally to a one-off address. |
+| `POST /api/seed` | Reset the demo dataset (keeps the chosen recipient). |
 | `GET /api/health` | Health probe (`/healthz` exists too but Cloud Run's frontend reserves that path — see learnings). |
 
-Mutating endpoints require the `X-Run-Token` header.
+**Auth.** Mutating endpoints require an `X-Run-Token` header and accept two values: `RUN_TOKEN` (secret, used by Cloud Scheduler) and a UI token derived from it as `sha256(RUN_TOKEN + "|dashboard")[:24]`, which the dashboard reads from `/api/state`. The public dashboard therefore drives the demo without the Scheduler's token ever reaching the browser, and without a build-time constant that can drift from the deployed service. Run and email endpoints are additionally rate-limited (40 runs/hour, 25 sends/hour) so a public URL can't burn Gemini quota or become a mail relay.
 
 ## Environment variables
 
@@ -199,9 +204,10 @@ Mutating endpoints require the `X-Run-Token` header.
 | `GEMINI_MODEL` | `gemini-3.5-flash` | The GA Gemini 3.5 model (3.5 Pro is not publicly released) |
 | `GOOGLE_CLOUD_LOCATION` | — | Use `global` so model calls route via Vertex's global endpoint |
 | `STORE` | auto | `memory` \| `firestore` |
-| `RUN_TOKEN` | `demo-token` | Shared token for mutating endpoints |
+| `RUN_TOKEN` | `demo-token` | Secret token for Cloud Scheduler; the dashboard's token is derived from it |
 | `TRACE_DELAY_MS` | `300` | Pacing of trace steps for the live UI |
-| `SMTP_HOST/PORT/USER/PASS`, `EMAIL_TO` | unset | Real email delivery (`email_setup.sh` configures this) |
+| `SMTP_HOST/PORT/USER/PASS` | unset | Mail transport (`email_setup.sh` configures this; 465 = SSL, 587 = STARTTLS) |
+| `EMAIL_TO` | unset | *Optional* fallback recipient — normally chosen in the dashboard at runtime |
 
 ## Data & scenarios
 
@@ -213,6 +219,7 @@ The synthetic dataset is **engineered to tell a story**: a hazmat shipment with 
 - **LLMs don't assume resource reuse.** Gemini's first cloud plan held 3 schedulable shipments citing "capacity limits" — it hadn't internalized that wagons can be reused after a turnaround. One prompt section of explicit *capacity facts* took it from 8 loads + 4 holds to a full 11-load day, with reuse called out in its own reasoning.
 - **Give the model a calculator, not a calendar.** Letting Gemini propose an *order* while a deterministic engine computes times eliminated an entire class of hallucination.
 - **Sync endpoints for headless runs.** Cloud Run throttles CPU after a response; a background planning thread can stall when nobody is polling. `?sync=true` for Cloud Scheduler (plus `--no-cpu-throttling`) makes automation bulletproof.
+- **Test the UI against the deployed config, not just the API.** Our `curl` checks all passed while the *dashboard's own buttons* returned 401 in production: the Vite bundle had baked in `VITE_RUN_TOKEN`'s default at build time, which no longer matched the token the service was deployed with. A build-time secret in a client bundle is guaranteed to drift; serving a derived token from the API at runtime fixed it permanently. We would have discovered this while recording.
 - **Production surfaces its own trivia:** Cloud Run's Google Frontend reserves `/healthz` (404 before reaching the container) and rejects bodyless `curl` POSTs with 411 unless `-d ''` sets a Content-Length.
 - **Fallbacks fire in real life.** Our first deploy pointed at `gemini-3.5-pro` — which isn't publicly released — and the deterministic fallback kept the service functional (honestly labeled) while we fixed the model ID. Design for the demo to never die.
 

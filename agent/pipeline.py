@@ -229,8 +229,9 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
 
     email = send_dispatch_email(plan, meta, store)
     emit("publish", "Dispatcher notified",
-         ("Email sent to " + email["to"]) if email["delivered"]
-         else "Email rendered + XLSX attached (SMTP not configured - preview in dashboard)")
+         f"Email + XLSX sent to {email['to']}" if email["delivered"]
+         else f"Email + XLSX rendered ({email.get('error') or 'preview only'}) "
+              f"- open the Dispatcher Delivery panel")
 
     if scenario_key:
         events = store.all("events")
