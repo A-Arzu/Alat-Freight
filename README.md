@@ -4,6 +4,9 @@
 
 Built for the **All Things Agentic Hackathon** (Taskmaster track).
 
+[![tests](https://github.com/A-Arzu/Alat-Freight/actions/workflows/ci.yml/badge.svg)](https://github.com/A-Arzu/Alat-Freight/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Gemini 3.5 Flash** · **Google ADK** · **Cloud Run** · **Firestore** · **Cloud Scheduler** · **Secret Manager** · **Cloud Logging**
 
 ### ▶ [Try the live dashboard](https://dispatch-agent-ygolewwlkq-uc.a.run.app)
