@@ -13,14 +13,16 @@ say() { echo; echo "---- $* ----"; }
 
 py() { python3 -c "$1" 2>/dev/null || python -c "$1"; }
 
+# NOTE: /healthz is reserved by Cloud Run's Google Frontend -> probe the API
+# instead; bodyless POSTs need -d '' or the frontend rejects them with 411.
 say "health"
-curl -sSf "${URL}/healthz" && echo
+curl -sSf -o /dev/null "${URL}/api/state" && echo "ok"
 
 say "seed demo data"
-curl -sSf -X POST "${URL}/api/seed" -H "X-Run-Token: ${TOKEN}" && echo
+curl -sSf -X POST "${URL}/api/seed" -H "X-Run-Token: ${TOKEN}" -d '' && echo
 
 say "morning optimization (sync - waits for the plan)"
-curl -sSf -X POST "${URL}/optimize?sync=true" -H "X-Run-Token: ${TOKEN}" && echo
+curl -sSf --max-time 280 -X POST "${URL}/optimize?sync=true" -H "X-Run-Token: ${TOKEN}" -d '' && echo
 
 say "plan v1"
 STATE="$(curl -sSf "${URL}/api/state")"
@@ -35,7 +37,7 @@ assert p['assignments'], 'no assignments!'
 "
 
 say "disruption: wagon W003 breakdown (sync)"
-curl -sSf -X POST "${URL}/events?sync=true" -H "X-Run-Token: ${TOKEN}" \
+curl -sSf --max-time 280 -X POST "${URL}/events?sync=true" -H "X-Run-Token: ${TOKEN}" \
   -H "Content-Type: application/json" -d '{"scenario": "wagon_breakdown"}' && echo
 
 say "plan v2 diff"
@@ -58,7 +60,7 @@ print('planner check:', 'GEMINI OK' if 'adk' in p['planner'].lower() or 'gemini'
 "
 
 say "reseed for a clean demo"
-curl -sSf -X POST "${URL}/api/seed" -H "X-Run-Token: ${TOKEN}" && echo
+curl -sSf -X POST "${URL}/api/seed" -H "X-Run-Token: ${TOKEN}" -d '' && echo
 
 echo
 echo "VERIFIED. Video proof points:"

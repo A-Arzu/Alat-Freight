@@ -17,7 +17,11 @@ if [[ -z "$PROJECT_ID" ]]; then
 fi
 REGION="${REGION:-us-central1}"
 SERVICE="${SERVICE:-dispatch-agent}"
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-pro}"
+# gemini-3.5-flash is the GA Gemini 3.5 model (3.5 Pro is not public yet);
+# GENAI_LOCATION=global routes model calls via the global endpoint, which
+# serves GA Gemini models regardless of regional rollout.
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-3.5-flash}"
+GENAI_LOCATION="${GENAI_LOCATION:-global}"
 SCHEDULE_TZ="${SCHEDULE_TZ:-Asia/Baku}"
 RUN_TOKEN="${RUN_TOKEN:-$(openssl rand -hex 12 2>/dev/null || echo demo-$RANDOM$RANDOM)}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,7 +51,7 @@ gcloud run deploy "$SERVICE" \
   --memory 1Gi --cpu 1 \
   --no-cpu-throttling \
   --max-instances 3 \
-  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${REGION},STORE=firestore,PLANNER=gemini,GEMINI_MODEL=${GEMINI_MODEL},RUN_TOKEN=${RUN_TOKEN},TRACE_DELAY_MS=250" \
+  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${GENAI_LOCATION},STORE=firestore,PLANNER=gemini,GEMINI_MODEL=${GEMINI_MODEL},RUN_TOKEN=${RUN_TOKEN},TRACE_DELAY_MS=250" \
   --quiet
 URL="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
 

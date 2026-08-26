@@ -75,7 +75,7 @@ def submit_plan(assignments: list[dict], holds: list[dict]) -> dict:
 
 agent = LlmAgent(
     name="dispatch_planner",
-    model=os.environ.get("GEMINI_MODEL", "gemini-3.5-pro"),
+    model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
     instruction=PLANNER_PROMPT,
     tools=[get_dispatch_snapshot, get_valid_pairings, propose_schedule, submit_plan],
 )

@@ -54,7 +54,7 @@ class DispatchPlan(BaseModel):
     plan_date: str
     generated_at: str
     trigger: str               # schedule | manual | event:<type>
-    planner: str               # e.g. "gemini-3.5-pro via Google ADK" | "deterministic heuristic"
+    planner: str               # e.g. "gemini-3.5-flash via Google ADK" | "deterministic heuristic"
     assignments: list[Assignment]
     holds: list[Hold] = []
     summary: dict = {}

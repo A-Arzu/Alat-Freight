@@ -51,8 +51,13 @@ def _check(token: str | None):
         raise HTTPException(status_code=401, detail="bad or missing X-Run-Token")
 
 
-@app.get("/healthz")
-def healthz():
+@app.get("/healthz")       # note: Cloud Run's Google Frontend reserves /healthz;
+def healthz():             # use /api/health when probing through the public URL
+    return {"ok": True}
+
+
+@app.get("/api/health")
+def api_health():
     return {"ok": True}
 
 

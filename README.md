@@ -31,7 +31,7 @@ flowchart LR
         end
         WEB["React dashboard<br/>static build"]
     end
-    GEM["Vertex AI<br/>Gemini 3.5 Pro"]
+    GEM["Vertex AI<br/>Gemini 3.5 Flash"]
     FS[("Firestore<br/>shipments · wagons · ships<br/>plans · runs · outcomes")]
     SM["Secret Manager<br/>SMTP credentials"]
     LOG["Cloud Logging<br/>reasoning trace"]
@@ -148,7 +148,7 @@ Then open the `.run.app` URL. Cost guard: the service scales to zero when idle; 
 | Var | Default | Meaning |
 |---|---|---|
 | `PLANNER` | `auto` | `gemini` \| `mock` \| `auto` (Gemini when `GOOGLE_CLOUD_PROJECT` is set) |
-| `GEMINI_MODEL` | `gemini-3.5-pro` | Vertex AI model id |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | Vertex AI model id (the GA Gemini 3.5 model; 3.5 Pro is not public yet) |
 | `STORE` | auto | `memory` \| `firestore` |
 | `RUN_TOKEN` | `demo-token` | shared token for `/optimize`, `/events`, `/api/seed` |
 | `TRACE_DELAY_MS` | `300` | pacing of trace steps for the live UI |

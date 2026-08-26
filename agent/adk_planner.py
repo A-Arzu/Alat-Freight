@@ -35,7 +35,7 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
     except ImportError as exc:
         raise PlannerUnavailable(f"google-adk not installed: {exc}")
 
-    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-pro")
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
     shipments_by_id = {s["id"]: s for s in scope}
     all_shipments_by_id = {s["id"]: s for s in state["shipments"]}
     wagons_by_id = {w["id"]: w for w in state["wagons"]}

@@ -152,7 +152,7 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
     if use_gemini:
         try:
             from agent import adk_planner
-            emit("reason", "Planner", f"Gemini ({os.environ.get('GEMINI_MODEL', 'gemini-3.5-pro')}) "
+            emit("reason", "Planner", f"Gemini ({os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash')}) "
                                       "via Google ADK engaged")
             fresh = adk_planner.plan(scope, state, emit, fixed_slots=kept)
         except Exception as exc:
