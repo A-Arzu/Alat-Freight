@@ -1,19 +1,72 @@
 # Port Operations Dispatch Agent
 
-**An autonomous agent that plans a port's cargo-loading day — and re-plans it live when things break.**
+> **An autonomous agent that plans a port's cargo-loading day — and re-plans it live when things break.**
 
-Built for the **All Things Agentic Hackathon** (Taskmaster track) with **Gemini + Google ADK + Cloud Run + Firestore + Cloud Scheduler**.
+Built for the **All Things Agentic Hackathon** (Taskmaster track).
 
-Every morning, a dispatcher decides which waiting shipment loads onto which rail wagon, in what order — juggling hazmat certification, cold-chain windows, weight limits, customer SLA tiers, wagon reservations, dock-team capacity, and hard ship cutoffs. Manually this takes ~45 minutes and gets it wrong under pressure. This agent does it in seconds, explains every decision with a confidence score, emails the dispatcher a formatted plan (+ Excel), and — when a wagon breaks down mid-morning — re-plans only the affected cargo and publishes a versioned diff.
+**Gemini 3.5 Flash** · **Google ADK** · **Cloud Run** · **Firestore** · **Cloud Scheduler** · **Secret Manager** · **Cloud Logging**
+
+![Architecture](docs/architecture.png)
+
+---
+
+## The problem
+
+Every morning, a port dispatcher decides which waiting shipment loads onto which rail wagon, in what order — juggling **eight kinds of constraints at once**: cargo-type rules (hazmat needs a certified closed wagon, perishables need a reefer, fragile needs cover), weight and axle limits, customer SLA tiers, cold-chain windows, wagon reservations and availability, dock-team capacity, customs status, and hard ship loading cutoffs. Done by hand this takes ~45 minutes, and under pressure the "wrong" wagon gets loaded first: premium cargo waits, perishables risk spoiling, ships sail without cargo that should have been aboard.
+
+And that's the *easy* part. The real test is **10:30 AM, when a wagon fails inspection** and half the plan is suddenly wrong.
+
+## What it does
+
+1. **Ingests** the port state from Firestore: shipment queue, wagon fleet, ship schedule, dock-team calendars, port clock.
+2. **Pre-filters in deterministic code**: every physically or legally impossible cargo-wagon pairing is removed *before the model ever sees it* (in the demo dataset: 51 illegal pairings eliminated, 37 legal options remain).
+3. **Reasons with Gemini 3.5 Flash via Google ADK**: the model decides priority order, pairing, and wagon reuse across the day — the soft trade-offs no if-statement can express ("hazmat has one wagon option and a hard cutoff; the perishable has two options and a ship in 3 days — who goes first?").
+4. **Computes times deterministically**: the model proposes an *order*; a gap-aware time-slot engine owns the clock. Gemini can never invent a load window.
+5. **Validates and self-corrects**: the plan is only accepted through a tool-gated `submit_plan` that re-checks every hard constraint; violations bounce back and the agent corrects itself (bounded retries).
+6. **Publishes and notifies**: versioned plan to Firestore; formatted HTML email + Excel attachment to the dispatcher; per-assignment confidence and a one-sentence reason on everything.
+7. **Re-plans on disruption**: wagon breakdown, ship cutoff moved, crane fault → deterministic impact analysis finds the affected subset, the agent re-plans *only that*, and publishes **plan v2 with a diff** — moved, retimed, rebooked, completed.
+8. **Keeps a human in command**: the dispatcher approves or overrides in one click; decisions land in an `outcomes` collection.
+
+## Verified results (real runs on Google Cloud)
+
+| Metric | Result |
+|---|---|
+| Planner | `gemini-3.5-flash` via Google ADK on Vertex AI |
+| Morning plan | 11 loads scheduled, 1 hold (customs), **0 hard-constraint violations** |
+| SLA compliance | 100% (morning) · 91% after wagon breakdown (1 unavoidable rebooking) |
+| Peak dock utilization | 92% |
+| Planning time | **~57 s** vs ~45 min manual baseline |
+| Disruption response | Plan v2: 1 shipment moved to the recovery reefer (clears its cutoff by 90 min), 1 rebooked to the next sailing, 5 loads recognized as already completed |
+| Automation | Cloud Scheduler fires the 06:00 plan daily with no human involved |
+
+Sample of Gemini's actual per-assignment reasoning from the deployed service:
+
+> *"Premium SLA; only hazmat-certified wagon available to meet SHIP-01 cutoff."*
+> *"Reuses covered wagon W005 after S005 to minimize port dwell time."*
+> *"Only usable reefer wagon W006; premium SLA; clears SHIP-01 cutoff by 90 min."*
 
 ## The demo in two clicks
 
-1. **Run agent** → the agent ingests the port state, filters out every illegal cargo-wagon pairing *in code*, reasons about priorities and trade-offs, schedules 11 loads across 2 dock teams, holds a shipment stuck in customs, and emails the plan. Watch the live reasoning trace stream in the Agent Activity panel.
-2. **Inject disruption → "Wagon W003 breakdown"** → the reefer wagon carrying two perishable shipments dies at 09:30. The agent triages the impact (4 loads already completed, 5 untouched, 2 affected), moves one shipment to the other reefer *and still makes its ship cutoff by 90 minutes*, and rebooks the one that can't make it onto the next sailing. Plan v2 ships with a full diff, ghost slots in the Gantt, and animated re-routes in the flow map. The dispatcher clicks **Approve**.
+1. **Run agent** → live reasoning trace streams into the Agent Activity panel; the plan board, dock-team Gantt, and cargo-routing flow map fill in; the dispatcher email (+ XLSX) renders in the Delivery panel.
+2. **Inject disruption → "Wagon W003 breakdown"** → the reefer carrying two perishable shipments dies at 09:30. Impact analysis, subset re-plan, and a full visual diff: ghost slots in the Gantt, animated re-routes in the flow map, "what changed" panel. Dispatcher clicks **Approve**.
 
-Two more scenarios are built in: a ship's loading cutoff moved earlier (the agent re-times cargo *earlier* to beat it) and a dock-team crane fault (loads spill to the surviving team).
+Two more built-in scenarios: a ship's loading cutoff moved earlier (the agent re-times cargo *earlier* to beat it) and a dock-team crane fault (loads spill to the surviving team).
 
 ## Architecture
+
+The design principle — **who does what**:
+
+| Layer | Owns | Why |
+|---|---|---|
+| **Deterministic Python** (agent tools) | Hard constraints: cargo-type rules, certifications, capacity, reservations, cold-chain windows, calendars, cutoff math | An LLM must never be able to break physics or law. It only ever sees *legal* options, and its output is re-validated anyway. |
+| **Gemini 3.5 Flash** (via Google ADK) | Soft trade-offs: priority ordering, pairing choice, wagon-reuse strategy, disruption recovery, per-assignment confidence + reason | There is no if-statement for competing priorities under scarcity. |
+| **`propose_schedule` tool** | Turning the model's chosen *order* into concrete times | The model decides sequence; the engine owns the clock. Gemini iterates: propose → see conflicts → reorder. |
+| **`submit_plan` tool** | The only door out | Illegal plans bounce back with named violations; the agent self-corrects (≤2 retries). |
+| **Automatic fallback** | Demo resilience | If Vertex AI is unreachable, a deterministic heuristic runs the same tools; the UI labels it honestly (`PLANNER: FALLBACK`). |
+| **Human dispatcher** | Approve / override | Confidence scores and rebookings are flagged; decisions accumulate in `outcomes`. |
+
+<details>
+<summary>Mermaid diagram source (renders on GitHub)</summary>
 
 ```mermaid
 flowchart LR
@@ -50,137 +103,133 @@ flowchart LR
     API -->|"outcomes"| FS
 ```
 
-### Who does what (the design principle)
+</details>
 
-| Layer | Owns | Why |
-|---|---|---|
-| **Deterministic Python** (agent tools) | Hard constraints: cargo-type rules, hazmat certs, capacity, reservations, cold-chain windows, dock/wagon calendars, cutoff math | An LLM must never be able to break physics or law. The model only ever sees *legal* options, and its output is re-validated anyway. |
-| **Gemini 3.5** (via Google ADK) | Soft trade-offs: priority ordering, pairing choice among legal options, disruption recovery, per-assignment confidence + reason | There is no if-statement for "hazmat with one wagon option vs. perishable with two — who goes first?" |
-| **`propose_schedule` tool** | Turning the model's chosen *order* into concrete times | The model decides sequence; the engine owns the clock. Gemini can iterate: propose → see conflicts → reorder. |
-| **`submit_plan` tool** | Validation gate | An illegal plan bounces back with violations; the agent corrects itself (bounded retries). |
-| **Human dispatcher** | Approve / override | Low confidence and rebookings are flagged; decisions land in `outcomes` for learning. |
+## Project structure
 
-If Vertex AI is unreachable mid-demo, the pipeline automatically falls back to a deterministic heuristic planner that runs the same tools — the run trace and UI say so honestly (`PLANNER: FALLBACK`).
+```
+agent/                the agent
+  adk_planner.py        Gemini LlmAgent + function tools (snapshot / pairings / schedule / submit)
+  mock_planner.py       deterministic fallback - same tools, transparent scoring
+  pipeline.py           run orchestration: trigger -> planner -> validate -> publish -> notify
+  prompts.py            planner instruction (objectives, capacity facts, workflow, output contract)
+  tools/                prefilter · time-slot engine · validator · impact analysis · email/XLSX
+api/main.py           FastAPI: agent endpoints + dashboard API + static frontend
+core/                 domain models (Pydantic), storage (memory | Firestore), KPIs, plan diff
+data/seed.py          the story dataset - date-relative and reproducible
+web/                  React + Vite control-tower dashboard
+deploy/               deploy.sh · verify.sh · email_setup.sh
+docs/                 architecture.svg / architecture.png
+test_*.py             story-arc, all-scenarios, and ADK-wiring tests
+```
 
 ## Run it locally (no cloud needed)
 
 Prereqs: Python 3.11+, Node 18+.
 
 ```bash
-# backend deps (minimal set for local mock mode)
 pip install fastapi "uvicorn[standard]" "pydantic>=2.7" openpyxl
-
-# build the dashboard
 cd web && npm install && npm run build && cd ..
-
-# start (memory store + deterministic planner, no GCP required)
 uvicorn api.main:app --port 8000
 ```
 
-Open http://localhost:8000 — seed data loads automatically. Press **Run agent**, then **Inject disruption**.
+Open http://localhost:8000 — seed data loads automatically. Press **Run agent**, then **Inject disruption**. Locally the deterministic fallback plans (honestly labeled); set up Google credentials + `PLANNER=gemini` to use the real model.
 
-Tests:
+**Tests**
 
 ```bash
 python test_pipeline.py     # full story arc + assertions
 python test_scenarios.py    # all three disruption scenarios
+python test_adk_wiring.py   # ADK agent/tool construction (pip install google-adk)
 ```
 
 ## Deploy to Google Cloud
 
-**One-shot script** (run from [Cloud Shell](https://shell.cloud.google.com) after cloning, or any machine with the gcloud SDK):
+**One-shot script** — run from [Cloud Shell](https://shell.cloud.google.com) after cloning:
 
 ```bash
 bash deploy/deploy.sh YOUR_PROJECT_ID
 ```
 
-It enables the APIs, creates Firestore, builds + deploys the Cloud Run service (`--no-cpu-throttling` so background agent runs never stall, 1 GiB RAM), grants the service account `aiplatform.user` + `datastore.user`, and creates the 06:00 Cloud Scheduler job (which calls `/optimize?sync=true` so headless runs complete inside the request). It prints the service URL and your run token.
+It enables the APIs (Run, Firestore, Vertex AI, Scheduler, Secret Manager, Cloud Build, Artifact Registry), creates Firestore, builds + deploys the Cloud Run service (`--no-cpu-throttling` so background agent runs never stall; 1 GiB RAM), grants the service account `aiplatform.user` + `datastore.user`, and creates the 06:00 Cloud Scheduler job (calling `/optimize?sync=true` so headless runs complete inside the request). It prints your service URL and run token.
 
-Then prove the whole story end to end on the cloud — including that **Gemini via ADK** actually planned (not the fallback):
+**Verify end to end** — proves the morning plan and the disruption re-plan on the cloud, and that **Gemini** (not the fallback) planned:
 
 ```bash
 bash deploy/verify.sh https://YOUR_SERVICE_URL RUN_TOKEN
 ```
 
-<details>
-<summary>Manual steps (what the script does)</summary>
+**Email delivery (Gmail)** — interactive; the app password is hidden-input and goes only to Secret Manager:
 
 ```bash
-gcloud config set project YOUR_PROJECT_ID
-
-# 1. enable services
-gcloud services enable run.googleapis.com firestore.googleapis.com \
-  aiplatform.googleapis.com cloudscheduler.googleapis.com secretmanager.googleapis.com
-
-# 2. Firestore (native mode)
-gcloud firestore databases create --location=nam5
-
-# 3. deploy (builds the Dockerfile: node builds the dashboard, python serves it)
-gcloud run deploy dispatch-agent --source . --region us-central1 \
-  --allow-unauthenticated \
-  --set-env-vars GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_LOCATION=us-central1,STORE=firestore,PLANNER=gemini,RUN_TOKEN=change-me
-
-# 4. let the service call Vertex AI + Firestore
-PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT_ID --format='value(projectNumber)')
-SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID --member="serviceAccount:${SA}" --role=roles/aiplatform.user
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID --member="serviceAccount:${SA}" --role=roles/datastore.user
-
-# 5. morning trigger (optional but part of the story)
-gcloud scheduler jobs create http daily-dispatch --location us-central1 \
-  --schedule="0 6 * * *" --time-zone="Asia/Baku" --http-method=POST \
-  --uri="https://YOUR_SERVICE_URL/optimize" --headers="X-Run-Token=change-me"
-
-# 6. optional email delivery (Gmail app password in Secret Manager)
-echo -n "your-app-password" | gcloud secrets create smtp-pass --data-file=-
-gcloud secrets add-iam-policy-binding smtp-pass --member="serviceAccount:${SA}" --role=roles/secretmanager.secretAccessor
-gcloud run services update dispatch-agent --region us-central1 \
-  --set-secrets SMTP_PASS=smtp-pass:latest \
-  --set-env-vars SMTP_HOST=smtp.gmail.com,SMTP_PORT=465,SMTP_USER=you@gmail.com,EMAIL_TO=dispatcher@example.com
+bash deploy/email_setup.sh
 ```
 
-</details>
+(Create the app password first at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) — requires 2-Step Verification. Without email configured, the plan email + XLSX still render in the dashboard's Delivery panel.)
 
-Then open the `.run.app` URL. Cost guard: the service scales to zero when idle; Gemini calls for a plan cost cents. While recording the demo video, set `--min-instances 1` to kill cold starts (then back to 0). After submitting, `gcloud scheduler jobs pause daily-dispatch --location us-central1`.
+**Demo-recording tips**
+
+```bash
+gcloud run services update dispatch-agent --region us-central1 --min-instances 1   # no cold starts on camera
+gcloud run services update dispatch-agent --region us-central1 --min-instances 0   # back to scale-to-zero
+gcloud scheduler jobs pause daily-dispatch --location us-central1                  # after submitting
+```
+
+Cost guard: everything scales to zero when idle; a full Gemini planning run costs cents.
+
+## API
+
+| Endpoint | Description |
+|---|---|
+| `POST /optimize` (`?sync=true`) | Morning batch plan. Async for the dashboard; sync for Cloud Scheduler. |
+| `POST /events` `{"scenario": "wagon_breakdown"}` | Disruption → incremental re-plan → plan v(n+1) + diff. Scenarios: `wagon_breakdown`, `ship_advanced`, `team_outage`. |
+| `GET /api/state` | Full snapshot: fleet, ships, plans, runs, events, emails (1.2 s cache). |
+| `GET /api/runs/{id}` | Live step trace of one agent run. |
+| `POST /api/plans/{id}/approve` · `/override` | Human-in-the-loop decision → `outcomes`. |
+| `POST /api/seed` | Reset the demo dataset. |
+| `GET /api/health` | Health probe (`/healthz` exists too but Cloud Run's frontend reserves that path — see learnings). |
+
+Mutating endpoints require the `X-Run-Token` header.
 
 ## Environment variables
 
 | Var | Default | Meaning |
 |---|---|---|
 | `PLANNER` | `auto` | `gemini` \| `mock` \| `auto` (Gemini when `GOOGLE_CLOUD_PROJECT` is set) |
-| `GEMINI_MODEL` | `gemini-3.5-flash` | Vertex AI model id (the GA Gemini 3.5 model; 3.5 Pro is not public yet) |
+| `GEMINI_MODEL` | `gemini-3.5-flash` | The GA Gemini 3.5 model (3.5 Pro is not publicly released) |
+| `GOOGLE_CLOUD_LOCATION` | — | Use `global` so model calls route via Vertex's global endpoint |
 | `STORE` | auto | `memory` \| `firestore` |
-| `RUN_TOKEN` | `demo-token` | shared token for `/optimize`, `/events`, `/api/seed` |
-| `TRACE_DELAY_MS` | `300` | pacing of trace steps for the live UI |
-| `SMTP_HOST/PORT/USER/PASS`, `EMAIL_TO` | unset | real email delivery; without it the email + XLSX are rendered and shown in the dashboard |
+| `RUN_TOKEN` | `demo-token` | Shared token for mutating endpoints |
+| `TRACE_DELAY_MS` | `300` | Pacing of trace steps for the live UI |
+| `SMTP_HOST/PORT/USER/PASS`, `EMAIL_TO` | unset | Real email delivery (`email_setup.sh` configures this) |
 
-## API
+## Data & scenarios
 
-| Endpoint | Description |
-|---|---|
-| `POST /optimize` | run the morning batch plan (Cloud Scheduler / dashboard) |
-| `POST /events` `{"scenario": "wagon_breakdown"}` | disruption → incremental re-plan, plan v(n+1) + diff |
-| `GET /api/state` | full snapshot: fleet, ships, plans, runs, events, emails |
-| `GET /api/runs/{id}` | live step trace of one agent run |
-| `POST /api/plans/{id}/approve` · `/override` | human-in-the-loop decision → `outcomes` |
-| `POST /api/seed` | reset the demo dataset |
+The synthetic dataset is **engineered to tell a story**: a hazmat shipment with exactly one certified wagon and a premium SLA; two perishables sharing the only available reefer under cold-chain windows; a heavyweight that fits one wagon; a reserved wagon honoring a standing agreement; a customs-blocked shipment; and a second reefer in transit until 15:30 — which becomes the recovery path when the first one breaks. Everything is date-relative to "today" with a frozen port clock, so runs are reproducible any time.
 
-## Project structure
+## Findings & learnings
 
-```
-agent/            the agent: ADK planner, fallback planner, pipeline, tools
-  adk_planner.py    Gemini LlmAgent + function tools (snapshot/pairings/schedule/submit)
-  mock_planner.py   deterministic fallback, same tools, transparent scoring
-  pipeline.py       run orchestration: triggers -> planner -> validate -> publish
-  tools/            prefilter · schedule engine · validator · impact analysis · notify
-api/main.py       FastAPI: endpoints + serves the dashboard
-core/             domain models, storage (memory/Firestore), KPIs, plan diff
-data/seed.py      the story dataset (date-relative, reproducible)
-web/              React + Vite control-tower dashboard
-```
+- **Pre-filtering is what makes the LLM trustworthy.** Removing illegal pairings in code before the model sees them (and re-validating after) means Gemini reasons only about *which legal plan is best* — the failure mode shifts from "dangerous" to merely "suboptimal".
+- **LLMs don't assume resource reuse.** Gemini's first cloud plan held 3 schedulable shipments citing "capacity limits" — it hadn't internalized that wagons can be reused after a turnaround. One prompt section of explicit *capacity facts* took it from 8 loads + 4 holds to a full 11-load day, with reuse called out in its own reasoning.
+- **Give the model a calculator, not a calendar.** Letting Gemini propose an *order* while a deterministic engine computes times eliminated an entire class of hallucination.
+- **Sync endpoints for headless runs.** Cloud Run throttles CPU after a response; a background planning thread can stall when nobody is polling. `?sync=true` for Cloud Scheduler (plus `--no-cpu-throttling`) makes automation bulletproof.
+- **Production surfaces its own trivia:** Cloud Run's Google Frontend reserves `/healthz` (404 before reaching the container) and rejects bodyless `curl` POSTs with 411 unless `-d ''` sets a Content-Length.
+- **Fallbacks fire in real life.** Our first deploy pointed at `gemini-3.5-pro` — which isn't publicly released — and the deterministic fallback kept the service functional (honestly labeled) while we fixed the model ID. Design for the demo to never die.
+
+## What's next
+
+- Connect real port systems (TOS shipment feeds, wagon telemetry) in place of the seed data.
+- Continuous re-planning: watch Firestore for state changes instead of explicit events.
+- Learn from `outcomes`: track predicted vs. actual load times and calibrate confidence.
+- Cost objectives: minimize crane hours and dwell simultaneously.
+- Gemma cross-check: run the same pre-filtered problem through Gemma and flag disagreements as low confidence.
 
 ## Disclosures
 
-- Built from scratch during the hackathon submission period.
-- Third-party libraries: FastAPI, Uvicorn, Pydantic, openpyxl, React, Vite (all standard open-source; no pre-existing project code).
-- Demo data is synthetic and engineered to exercise the constraint system (hazmat scarcity, cold-chain windows, reservations, customs holds, cutoff conflicts).
+- Built from scratch during the hackathon submission period; all commits are within it.
+- Third-party open-source libraries: FastAPI, Uvicorn, Pydantic, openpyxl, React, Vite, google-adk, google-genai, google-cloud-firestore. No pre-existing project code.
+- Demo data is synthetic.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 660" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#274B63"/>
+    </marker>
+    <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#E8630A"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1180" height="660" fill="#F5F7F8"/>
+  <rect x="0" y="0" width="1180" height="6" fill="#E8630A"/>
+
+  <!-- title -->
+  <text x="40" y="52" font-size="26" font-weight="700" fill="#16324A" letter-spacing="1">PORT OPERATIONS DISPATCH AGENT</text>
+  <text x="40" y="78" font-size="13.5" fill="#5E7182">Autonomous cargo-to-wagon dispatch with live disruption recovery &#8212; All Things Agentic Hackathon &#183; Taskmaster track</text>
+  <text x="1140" y="52" text-anchor="end" font-size="12" font-family="Consolas, monospace" fill="#C85510" font-weight="700">Gemini 3.5 Flash &#183; Google ADK</text>
+  <text x="1140" y="72" text-anchor="end" font-size="12" font-family="Consolas, monospace" fill="#5E7182">Cloud Run &#183; Firestore &#183; Cloud Scheduler</text>
+
+  <!-- triggers -->
+  <rect x="40" y="250" width="180" height="64" rx="8" fill="#FFFFFF" stroke="#274B63" stroke-width="1.6"/>
+  <text x="130" y="278" text-anchor="middle" font-size="15" font-weight="700" fill="#1D3A50">Cloud Scheduler</text>
+  <text x="130" y="298" text-anchor="middle" font-size="12" fill="#5E7182">cron &#183; 06:00 daily</text>
+
+  <rect x="40" y="350" width="180" height="64" rx="8" fill="#FFFFFF" stroke="#274B63" stroke-width="1.6"/>
+  <text x="130" y="378" text-anchor="middle" font-size="15" font-weight="700" fill="#1D3A50">Dashboard</text>
+  <text x="130" y="398" text-anchor="middle" font-size="12" fill="#5E7182">Run now &#183; inject event</text>
+
+  <line x1="220" y1="282" x2="276" y2="282" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <line x1="220" y1="382" x2="276" y2="382" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="248" y="322" text-anchor="middle" font-size="11" font-family="Consolas, monospace" fill="#5E7182">POST</text>
+  <text x="248" y="336" text-anchor="middle" font-size="11" font-family="Consolas, monospace" fill="#5E7182">/optimize</text>
+  <text x="248" y="350" text-anchor="middle" font-size="11" font-family="Consolas, monospace" fill="#5E7182">&#183; /events</text>
+
+  <!-- Cloud Run -->
+  <rect x="280" y="140" width="540" height="380" rx="12" fill="#FFFFFF" stroke="#274B63" stroke-width="2"/>
+  <text x="300" y="170" font-size="14" font-weight="700" font-family="Consolas, monospace" fill="#16324A" letter-spacing="1.5">CLOUD RUN &#8212; dispatch-agent</text>
+  <text x="300" y="190" font-size="12" fill="#5E7182">FastAPI + Google ADK &#183; one container &#183; serves the React dashboard &#183; scales to zero</text>
+
+  <!-- pipeline row 1 -->
+  <rect x="304" y="210" width="150" height="84" rx="8" fill="#F5F7F8" stroke="#274B63" stroke-width="1.4"/>
+  <text x="379" y="242" text-anchor="middle" font-size="14" font-weight="700" fill="#1D3A50">1 &#183; Ingest</text>
+  <text x="379" y="262" text-anchor="middle" font-size="11.5" fill="#5E7182">queue &#183; fleet &#183; ships</text>
+  <text x="379" y="278" text-anchor="middle" font-size="11.5" fill="#5E7182">port clock</text>
+
+  <rect x="478" y="210" width="150" height="84" rx="8" fill="#F5F7F8" stroke="#274B63" stroke-width="1.4"/>
+  <text x="553" y="242" text-anchor="middle" font-size="14" font-weight="700" fill="#1D3A50">2 &#183; Pre-filter</text>
+  <text x="553" y="262" text-anchor="middle" font-size="11.5" fill="#5E7182">hard constraints</text>
+  <text x="553" y="278" text-anchor="middle" font-size="11.5" fill="#5E7182">deterministic code</text>
+
+  <rect x="652" y="210" width="144" height="84" rx="8" fill="#FDF1E8" stroke="#E8630A" stroke-width="2"/>
+  <text x="724" y="242" text-anchor="middle" font-size="14" font-weight="700" fill="#C85510">3 &#183; Reason</text>
+  <text x="724" y="262" text-anchor="middle" font-size="11.5" fill="#5E7182">Gemini 3.5 Flash</text>
+  <text x="724" y="278" text-anchor="middle" font-size="11.5" fill="#5E7182">soft trade-offs</text>
+
+  <line x1="454" y1="252" x2="474" y2="252" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <line x1="628" y1="252" x2="648" y2="252" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+
+  <!-- row1 -> row2 -->
+  <line x1="744" y1="294" x2="744" y2="356" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="754" y="330" font-size="11.5" fill="#5E7182">draft</text>
+  <line x1="686" y1="356" x2="686" y2="300" stroke="#E8630A" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arA)"/>
+  <text x="676" y="322" text-anchor="end" font-size="11" fill="#C85510">retry &#8804;2</text>
+  <text x="676" y="337" text-anchor="end" font-size="11" fill="#C85510">if invalid</text>
+
+  <!-- pipeline row 2 -->
+  <rect x="652" y="360" width="144" height="84" rx="8" fill="#F5F7F8" stroke="#274B63" stroke-width="1.4"/>
+  <text x="724" y="392" text-anchor="middle" font-size="14" font-weight="700" fill="#1D3A50">4 &#183; Validate</text>
+  <text x="724" y="412" text-anchor="middle" font-size="11.5" fill="#5E7182">re-check every rule</text>
+  <text x="724" y="428" text-anchor="middle" font-size="11.5" fill="#5E7182">deterministic code</text>
+
+  <rect x="304" y="360" width="300" height="84" rx="8" fill="#F5F7F8" stroke="#274B63" stroke-width="1.4"/>
+  <text x="454" y="392" text-anchor="middle" font-size="14" font-weight="700" fill="#1D3A50">5 &#183; Publish &amp; notify</text>
+  <text x="454" y="412" text-anchor="middle" font-size="11.5" fill="#5E7182">plan &#8594; Firestore &#183; email + XLSX &#8594; dispatcher</text>
+  <text x="454" y="428" text-anchor="middle" font-size="11.5" fill="#5E7182">reasoning + confidence on every assignment</text>
+
+  <line x1="648" y1="402" x2="608" y2="402" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="628" y="392" text-anchor="middle" font-size="11" fill="#5E7182">ok</text>
+
+  <!-- Vertex AI -->
+  <rect x="860" y="180" width="280" height="124" rx="10" fill="#FFFFFF" stroke="#E8630A" stroke-width="2"/>
+  <text x="1000" y="212" text-anchor="middle" font-size="16" font-weight="700" fill="#C85510">Vertex AI</text>
+  <text x="1000" y="234" text-anchor="middle" font-size="13" fill="#1D3A50">Gemini 3.5 Flash</text>
+  <text x="1000" y="254" text-anchor="middle" font-size="11.5" fill="#5E7182">tool-calling loop &#183; tool-gated submit</text>
+  <text x="1000" y="272" text-anchor="middle" font-size="11.5" fill="#5E7182">automatic deterministic fallback</text>
+  <text x="1000" y="290" text-anchor="middle" font-size="11.5" fill="#5E7182">(+ Gemma cross-check &#8212; optional)</text>
+
+  <line x1="796" y1="232" x2="856" y2="232" stroke="#E8630A" stroke-width="1.8" marker-end="url(#arA)"/>
+  <text x="828" y="222" text-anchor="middle" font-size="11" font-family="Consolas, monospace" fill="#C85510">candidates</text>
+  <line x1="856" y1="262" x2="800" y2="262" stroke="#E8630A" stroke-width="1.8" marker-end="url(#arA)"/>
+  <text x="828" y="280" text-anchor="middle" font-size="11" font-family="Consolas, monospace" fill="#C85510">plan JSON</text>
+
+  <!-- supporting services -->
+  <text x="860" y="366" font-size="10.5" font-family="Consolas, monospace" fill="#8AA0B0" letter-spacing="1.5">SUPPORTING SERVICES</text>
+  <rect x="860" y="376" width="280" height="44" rx="8" fill="#FFFFFF" stroke="#8AA0B0" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <text x="874" y="394" font-size="13" font-weight="700" fill="#1D3A50">Secret Manager</text>
+  <text x="874" y="411" font-size="11.5" fill="#5E7182">SMTP credentials for email delivery</text>
+  <rect x="860" y="432" width="280" height="44" rx="8" fill="#FFFFFF" stroke="#8AA0B0" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <text x="874" y="450" font-size="13" font-weight="700" fill="#1D3A50">Cloud Logging</text>
+  <text x="874" y="467" font-size="11.5" fill="#5E7182">step-by-step agent reasoning trace</text>
+
+  <!-- Firestore -->
+  <rect x="280" y="560" width="300" height="76" rx="10" fill="#FFFFFF" stroke="#274B63" stroke-width="1.6"/>
+  <text x="430" y="586" text-anchor="middle" font-size="15" font-weight="700" fill="#1D3A50">Firestore</text>
+  <text x="430" y="606" text-anchor="middle" font-size="11.5" fill="#5E7182">shipments &#183; wagons &#183; ships &#183; customers</text>
+  <text x="430" y="622" text-anchor="middle" font-size="11.5" fill="#5E7182">dispatch_plans (versioned) &#183; runs &#183; outcomes</text>
+
+  <line x1="350" y1="556" x2="350" y2="524" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="358" y="546" font-size="11.5" fill="#5E7182">reads state</text>
+  <line x1="500" y1="520" x2="500" y2="556" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="508" y="546" font-size="11.5" fill="#5E7182">writes plans + outcomes</text>
+
+  <!-- Dispatcher -->
+  <rect x="700" y="560" width="300" height="76" rx="10" fill="#FFFFFF" stroke="#274B63" stroke-width="1.6"/>
+  <text x="850" y="586" text-anchor="middle" font-size="15" font-weight="700" fill="#1D3A50">Dispatcher (human)</text>
+  <text x="850" y="606" text-anchor="middle" font-size="11.5" fill="#5E7182">HTML email + XLSX attachment</text>
+  <text x="850" y="622" text-anchor="middle" font-size="11.5" fill="#5E7182">approve / override in the dashboard</text>
+
+  <line x1="780" y1="520" x2="780" y2="556" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="788" y="546" font-size="11.5" fill="#5E7182">email + XLSX</text>
+  <line x1="696" y1="598" x2="584" y2="598" stroke="#274B63" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="640" y="588" text-anchor="middle" font-size="11" fill="#5E7182">approve / override</text>
+
+  <!-- footer -->
+  <text x="40" y="648" font-size="11" font-family="Consolas, monospace" fill="#8AA0B0">github.com/A-Arzu/Alat-Freight</text>
+  <text x="1140" y="648" text-anchor="end" font-size="10.5" fill="#8AA0B0">solid = data / control flow &#183; dashed orange = self-correction retry &#183; dotted = supporting service</text>
+</svg>
