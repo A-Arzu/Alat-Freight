@@ -27,6 +27,29 @@ def _now_iso():
     return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
 
+# A run whose container died mid-flight would otherwise stay "running" forever
+# and lock the dashboard. Anything older than this is treated as stalled.
+STALE_RUN_MIN = 6
+
+
+def is_stale(run: dict) -> bool:
+    if run.get("status") != "running":
+        return False
+    try:
+        started = datetime.strptime(run["started_at"], "%Y-%m-%dT%H:%M:%S")
+    except (KeyError, ValueError, TypeError):
+        return True
+    return (datetime.now() - started).total_seconds() > STALE_RUN_MIN * 60
+
+
+def active_run(store) -> dict | None:
+    """The one run currently in flight, if any (ignoring stalled ones)."""
+    for run in store.all("runs"):
+        if run.get("status") == "running" and not is_stale(run):
+            return run
+    return None
+
+
 def _create_run(store, trigger: str, scenario_key: str | None) -> str:
     run_id = f"run-{uuid.uuid4().hex[:8]}"
     run = {"id": run_id, "started_at": _now_iso(), "finished_at": None,
@@ -175,14 +198,22 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
     # ---- assemble + diff -------------------------------------------------
     version = (old_plan["version"] + 1) if old_plan else 1
     plan_id = f"plan-{meta['plan_date']}-v{version}"
+    while store.get("plans", plan_id):     # never clobber an existing plan
+        version += 1
+        plan_id = f"plan-{meta['plan_date']}-v{version}"
     all_assignments = completed + kept + fresh["assignments"]
 
+    # Carry forward holds for anything this run did not touch - on a disruption
+    # re-plan (out of scope) and equally on a plain re-run, where a rebooked
+    # shipment is deliberately excluded from scope and would otherwise vanish
+    # from the plan and silently inflate SLA back to 100%.
     carry_holds = []
-    if old_plan and scope_ids is not None:
+    if old_plan:
         fresh_hold_ids = {h["shipment_id"] for h in fresh["holds"]}
+        assigned_ids = {a["shipment_id"] for a in all_assignments}
         carry_holds = [h for h in old_plan.get("holds", [])
                        if h["shipment_id"] not in fresh_hold_ids
-                       and h["shipment_id"] not in {a["shipment_id"] for a in all_assignments}]
+                       and h["shipment_id"] not in assigned_ids]
     all_holds = carry_holds + fresh["holds"]
 
     diff = []
@@ -216,12 +247,15 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
     store.update("meta", "meta", {"active_plan_id": plan_id})
 
     # ---- shipment status chips ------------------------------------------
+    known = set(shipments_by_id)
     for a in all_assignments:
-        store.update("shipments", a["shipment_id"],
-                     {"status": a["status"] if a["change"] == "completed" else "planned"})
+        if a["shipment_id"] in known:
+            store.update("shipments", a["shipment_id"],
+                         {"status": a["status"] if a["change"] == "completed" else "planned"})
     for h in all_holds:
-        store.update("shipments", h["shipment_id"],
-                     {"status": "rebooked" if h.get("rebook_ship") else "hold"})
+        if h["shipment_id"] in known:
+            store.update("shipments", h["shipment_id"],
+                         {"status": "rebooked" if h.get("rebook_ship") else "hold"})
 
     emit("publish", f"Plan v{version} published",
          f"{summary['planned']} loads - {summary['holds']} holds - "

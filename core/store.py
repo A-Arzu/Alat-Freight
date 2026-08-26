@@ -62,12 +62,28 @@ class FirestoreStore:
         return self._db.collection(f"{self._prefix}_{coll}")
 
     def reset(self, state: dict):
+        """Batched wipe, then a single batched repopulate, so the dashboard
+        sees an empty store for as short a window as possible."""
+        batch, pending = self._db.batch(), 0
         for coll in COLLECTIONS:
             for doc in self._coll(coll).stream():
-                doc.reference.delete()
+                batch.delete(doc.reference)
+                pending += 1
+                if pending >= 400:
+                    batch.commit()
+                    batch, pending = self._db.batch(), 0
+        if pending:
+            batch.commit()
+        batch, pending = self._db.batch(), 0
         for coll, items in state.items():
             for obj in items:
-                self._coll(coll).document(obj["id"]).set(obj)
+                batch.set(self._coll(coll).document(obj["id"]), obj)
+                pending += 1
+                if pending >= 400:
+                    batch.commit()
+                    batch, pending = self._db.batch(), 0
+        if pending:
+            batch.commit()
 
     def all(self, coll: str) -> list[dict]:
         return [d.to_dict() for d in self._coll(coll).stream()]
@@ -80,7 +96,14 @@ class FirestoreStore:
         self._coll(coll).document(obj["id"]).set(obj)
 
     def update(self, coll: str, oid: str, patch: dict):
-        self._coll(coll).document(oid).set(patch, merge=True)
+        # set(merge=True) would CREATE a missing document - a phantom row with
+        # no id field that later crashes {s["id"]: s for s in ...}. MemoryStore
+        # no-ops on a missing key, so match that exactly.
+        from google.api_core.exceptions import NotFound
+        try:
+            self._coll(coll).document(oid).update(patch)
+        except NotFound:
+            pass
 
     def state(self) -> dict:
         return {c: self.all(c) for c in COLLECTIONS}

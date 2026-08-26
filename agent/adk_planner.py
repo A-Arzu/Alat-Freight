@@ -107,6 +107,15 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
         slots, sched_violations = build_schedule(ordered, all_shipments_by_id, wagons_by_id,
                                                  ships_by_id, teams, now, fixed_slots)
         slot_by_sid = {x["shipment_id"]: x for x in slots}
+
+        def _num(value, default, lo, hi):
+            """Model output is untrusted: coerce and clamp, never crash the run
+            after planning already succeeded."""
+            try:
+                return max(lo, min(hi, int(float(value))))
+            except (TypeError, ValueError):
+                return default
+
         full = []
         for a in assignments:
             slot = slot_by_sid.get(a["shipment_id"])
@@ -118,23 +127,38 @@ def plan(scope: list[dict], state: dict, trace, fixed_slots: list[dict] | None =
                 "team_id": slot["team_id"], "load_start": slot["load_start"],
                 "load_end": slot["load_end"], "duration_min": slot["duration_min"],
                 "target_ship": s["target_ship"],
-                "priority": int(a.get("priority", 2)),
-                "confidence": int(a.get("confidence", 75)),
+                "priority": _num(a.get("priority"), 2, 1, 3),
+                "confidence": _num(a.get("confidence"), 75, 0, 100),
                 "reason": str(a.get("reason", ""))[:300],
                 "status": "planned", "change": "new",
             })
         violations = [f"{v['shipment_id']}: {v['detail']}" for v in sched_violations]
         violations += validate_plan(full, all_shipments_by_id, wagons_by_id, ships_by_id, now)
+
+        # every shipment in scope must be accounted for - assigned or explicitly
+        # held. Silently dropping one would make it vanish from the plan, the
+        # board and the dispatcher's email.
+        accounted = {a["shipment_id"] for a in full}
+        accounted |= {h.get("shipment_id") for h in (holds or [])
+                      if h.get("shipment_id") in all_shipments_by_id}
+        missing = [s["id"] for s in scope if s["id"] not in accounted]
+        if missing:
+            violations.append(
+                f"unaccounted shipments {missing} - every shipment must be either "
+                f"assigned or placed in holds with a reason")
+
         if violations:
             trace("validate", "submit_plan rejected", "; ".join(violations[:4]))
             return {"status": "rejected", "violations": violations}
+        # a hold naming an unknown shipment would later create a phantom record
         clean_holds = [{
-            "shipment_id": h["shipment_id"], "action": str(h.get("action", "Hold")),
-            "reason": str(h.get("reason", "")), "rebook_ship": h.get("rebook_ship"),
+            "shipment_id": h["shipment_id"], "action": str(h.get("action", "Hold"))[:200],
+            "reason": str(h.get("reason", ""))[:300],
+            "rebook_ship": h.get("rebook_ship") if h.get("rebook_ship") in ships_by_id else None,
             "retry_at": h.get("retry_at"),
-            "confidence": int(h.get("confidence", 80)),
-            "change": "rebooked" if h.get("rebook_ship") else "held",
-        } for h in holds or []]
+            "confidence": _num(h.get("confidence"), 80, 0, 100),
+            "change": "rebooked" if h.get("rebook_ship") in ships_by_id else "held",
+        } for h in (holds or []) if h.get("shipment_id") in all_shipments_by_id]
         result["submitted"] = {"assignments": full, "holds": clean_holds,
                                "planner": f"{model_name} via Google ADK"}
         trace("validate", "submit_plan accepted",

@@ -17,9 +17,12 @@ export default function Ships({ ships, plan, meta }) {
       </div>
       <div className="panel-bd">
         <div className="ship-list">
-          {[...ships].sort((a, b) => a.loading_cutoff.localeCompare(b.loading_cutoff)).map((v) => {
-            const sameDay = v.loading_cutoff.slice(0, 10) === meta.now.slice(0, 10)
-            const label = untilLabel(v.loading_cutoff, meta.now)
+          {[...ships]
+            .filter((v) => v && v.loading_cutoff)
+            .sort((a, b) => a.loading_cutoff.localeCompare(b.loading_cutoff)).map((v) => {
+            const now = meta?.now || ''
+            const sameDay = !!now && v.loading_cutoff.slice(0, 10) === now.slice(0, 10)
+            const label = untilLabel(v.loading_cutoff, now)
             return (
               <div className="scard" key={v.id}>
                 <div>

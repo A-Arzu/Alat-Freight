@@ -23,7 +23,7 @@ import time
 from collections import deque
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Header, Body
+from fastapi import FastAPI, HTTPException, Header, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -40,26 +40,41 @@ UI_TOKEN = hashlib.sha256(f"{RUN_TOKEN}|dashboard".encode()).hexdigest()[:24]
 _cache = {"t": 0.0, "data": None}
 _CACHE_TTL = 1.2
 
-# generous guard rails on a public endpoint: stop a runaway loop or a scraper
-# from burning Gemini quota or turning the mailer into a spam relay
-_limits = {"run": deque(), "email": deque()}
-_LIMITS = {"run": (40, 3600), "email": (25, 3600)}
+# Guard rails on a public endpoint: stop a runaway loop or a scraper from
+# burning Gemini quota, wiping the demo, or turning the mailer into a relay.
+# Counted per caller so one visitor can never lock the presenter out.
+_limits: dict[tuple[str, str], deque] = {}
+_LIMITS = {"run": (60, 3600), "email": (25, 3600), "seed": (60, 3600)}
 
 
 def _invalidate():
     _cache["t"] = 0.0
 
 
-def _rate_limit(bucket: str):
+def _caller(request: Request | None) -> str:
+    if request is None:
+        return "unknown"
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _rate_limit(bucket: str, request: Request | None = None):
     cap, window = _LIMITS[bucket]
+    key = (bucket, _caller(request))
     now = time.time()
-    stamps = _limits[bucket]
+    stamps = _limits.setdefault(key, deque())
     while stamps and now - stamps[0] > window:
         stamps.popleft()
     if len(stamps) >= cap:
-        raise HTTPException(status_code=429,
-                            detail=f"rate limit: max {cap} {bucket} requests per hour")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit reached ({cap} {bucket} requests/hour). Try again shortly.")
     stamps.append(now)
+    if len(_limits) > 5000:               # bound the bookkeeping
+        for k in [k for k, v in _limits.items() if not v][:2000]:
+            _limits.pop(k, None)
 
 
 @asynccontextmanager
@@ -101,6 +116,9 @@ def api_state():
     state["events"].sort(key=lambda e: e["received_at"], reverse=True)
     state["emails"].sort(key=lambda e: e["created_at"], reverse=True)
     state["runs"] = state["runs"][:10]
+    for run in state["runs"]:             # never let a dead run lock the UI
+        if pipeline.is_stale(run):
+            run["status"] = "stalled"
     meta = next((m for m in state["meta"] if m["id"] == "meta"), {})
     scenarios = next((m for m in state["meta"] if m["id"] == "scenarios"), {"items": []})
     state["meta"] = meta
@@ -118,11 +136,15 @@ def api_state():
 
 
 @app.post("/optimize")
-def optimize(sync: bool = False, x_run_token: str | None = Header(default=None)):
+def optimize(request: Request, sync: bool = False,
+             x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
-    _rate_limit("run")
+    _rate_limit("run", request)
     _invalidate()
     store = get_store()
+    busy = pipeline.active_run(store)     # double-click is idempotent, not a race
+    if busy:
+        return {"run_id": busy["id"], "already_running": True}
     if sync:  # Cloud Scheduler path: block until the plan is published
         run_id = pipeline.run_now(store, trigger="schedule")
         run = store.get("runs", run_id)
@@ -132,15 +154,18 @@ def optimize(sync: bool = False, x_run_token: str | None = Header(default=None))
 
 
 @app.post("/events")
-def events(payload: dict = Body(...), sync: bool = False,
+def events(request: Request, payload: dict = Body(...), sync: bool = False,
            x_run_token: str | None = Header(default=None)):
     _check(x_run_token)
     scenario = payload.get("scenario")
     if not scenario:
         raise HTTPException(status_code=422, detail="body must include {'scenario': <key>}")
-    _rate_limit("run")
+    _rate_limit("run", request)
     _invalidate()
     store = get_store()
+    busy = pipeline.active_run(store)
+    if busy:
+        return {"run_id": busy["id"], "already_running": True}
     if sync:
         run_id = pipeline.run_now(store, trigger="event", scenario_key=scenario)
         run = store.get("runs", run_id)
@@ -158,10 +183,11 @@ def get_run(run_id: str):
 
 
 @app.post("/api/settings/email")
-def set_email_recipient(payload: dict = Body(default={}),
+def set_email_recipient(request: Request, payload: dict = Body(default={}),
                         x_run_token: str | None = Header(default=None)):
     """Choose who receives dispatch plans, from the dashboard, at runtime."""
     _check(x_run_token)
+    _rate_limit("email", request)
     raw = str(payload.get("recipient", "")).strip()
     store = get_store()
     if not raw:
@@ -180,11 +206,11 @@ def set_email_recipient(payload: dict = Body(default={}),
 
 
 @app.post("/api/plans/{plan_id}/email")
-def email_plan(plan_id: str, payload: dict = Body(default={}),
+def email_plan(plan_id: str, request: Request, payload: dict = Body(default={}),
                x_run_token: str | None = Header(default=None)):
     """(Re)send an existing plan - optionally to a one-off recipient."""
     _check(x_run_token)
-    _rate_limit("email")
+    _rate_limit("email", request)
     store = get_store()
     plan = store.get("plans", plan_id)
     if not plan:
@@ -232,9 +258,10 @@ def _decide(plan_id: str, action: str, note: str):
 
 
 @app.post("/api/seed")
-def seed(x_run_token: str | None = Header(default=None)):
+def seed(request: Request, x_run_token: str | None = Header(default=None)):
     """Reset the demo dataset. The chosen email recipient survives a reseed."""
     _check(x_run_token)
+    _rate_limit("seed", request)
     store = get_store()
     keep = (store.get("meta", "meta") or {}).get("email_to")
     store.reset(build_state())

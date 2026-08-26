@@ -141,6 +141,7 @@ Open http://localhost:8000 — seed data loads automatically. Press **Run agent*
 python test_pipeline.py     # full story arc + assertions
 python test_scenarios.py    # all three disruption scenarios
 python test_email.py        # recipient validation, precedence, SMTP send/failure paths
+python test_hardening.py    # stalled runs, plan-id collisions, store parity, re-run integrity
 python test_adk_wiring.py   # ADK agent/tool construction (pip install google-adk)
 ```
 
@@ -222,6 +223,9 @@ The synthetic dataset is **engineered to tell a story**: a hazmat shipment with 
 - **Test the UI against the deployed config, not just the API.** Our `curl` checks all passed while the *dashboard's own buttons* returned 401 in production: the Vite bundle had baked in `VITE_RUN_TOKEN`'s default at build time, which no longer matched the token the service was deployed with. A build-time secret in a client bundle is guaranteed to drift; serving a derived token from the API at runtime fixed it permanently. We would have discovered this while recording.
 - **Production surfaces its own trivia:** Cloud Run's Google Frontend reserves `/healthz` (404 before reaching the container) and rejects bodyless `curl` POSTs with 411 unless `-d ''` sets a Content-Length.
 - **Fallbacks fire in real life.** Our first deploy pointed at `gemini-3.5-pro` — which isn't publicly released — and the deterministic fallback kept the service functional (honestly labeled) while we fixed the model ID. Design for the demo to never die.
+- **The dangerous bugs live in the gap between two implementations.** Our `MemoryStore.update()` no-ops on a missing key while Firestore's `set(merge=True)` *creates* the document — so an unexpected id would have written a phantom record with no `id` field, and every later run would crash on `{s["id"]: s ...}`. Local tests could never have caught it; the fix was making Firestore's semantics match memory's exactly.
+- **Treat model output as untrusted input, all the way through.** A priority outside 1–3 would have failed Pydantic validation *after* planning succeeded — past the Gemini→fallback safety net, turning a cosmetic model slip into a dead run. Coercing and clamping at the tool boundary keeps a bad number from becoming an outage.
+- **Model output can be incomplete, not just wrong.** Nothing forced Gemini to account for every shipment, so one could silently vanish from the plan, the board *and* the email. `submit_plan` now rejects any plan that leaves an in-scope shipment neither assigned nor explicitly held.
 
 ## What's next
 
