@@ -84,7 +84,11 @@ def audit(plan: dict, scope: list[dict], state: dict, emit) -> dict:
         )
         flags = _parse_flags(getattr(resp, "text", "") or "")
     except Exception as exc:                 # unreachable model must never fail a run
-        emit("reason", "Gemma audit unavailable", f"{type(exc).__name__}: {exc}"[:160])
+        blob = str(exc)
+        note = ("model not enabled for this project - set a Gemini API key in "
+                "GEMMA_API_KEY to use it" if "404" in blob or "NOT_FOUND" in blob
+                else f"{type(exc).__name__}")
+        emit("reason", "Gemma cross-check skipped", f"second-model audit unavailable ({note})")
         return {"ran": False, "reason": "call failed"}
 
     by_id = {f["shipment_id"]: f["concern"] for f in flags
