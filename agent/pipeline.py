@@ -139,7 +139,9 @@ def _latest_plan(store):
     plans = store.all("plans")
     if not plans:
         return None
-    plans.sort(key=lambda p: p["generated_at"])
+    # version breaks same-second generated_at ties, so we never re-plan from
+    # an older plan when two share a timestamp
+    plans.sort(key=lambda p: (p["generated_at"], p.get("version", 0)))
     return plans[-1]
 
 

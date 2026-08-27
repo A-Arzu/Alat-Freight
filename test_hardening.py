@@ -93,6 +93,18 @@ except pydantic.ValidationError:
     pass                                  # hence the clamp in adk_planner.submit_plan
 print("plan schema rejects out-of-range priority: OK (clamped upstream)")
 
+# ---- 5b. same-second plans must resolve newest-first by version ---------
+from agent.pipeline import _latest_plan
+s2 = MemoryStore()
+ts = "2026-08-26T06:00:00"
+s2.upsert("plans", {"id": "p-v1", "version": 1, "generated_at": ts,
+                    "assignments": [], "holds": [], "diff": [], "summary": {}})
+s2.upsert("plans", {"id": "p-v2", "version": 2, "generated_at": ts,
+                    "assignments": [], "holds": [], "diff": [], "summary": {}})
+latest = _latest_plan(s2)
+assert latest["version"] == 2, f"tie must resolve to newest version, got v{latest['version']}"
+print("same-second plan tie-break: OK (v2 wins over v1)")
+
 # ---- 6. the agent's memory of human judgement --------------------------
 from agent.tools.memory import dispatcher_history
 

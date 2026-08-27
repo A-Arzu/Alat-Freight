@@ -111,7 +111,9 @@ def api_state():
         return _cache["data"]
     store = get_store()
     state = store.state()
-    state["plans"].sort(key=lambda p: p["generated_at"], reverse=True)
+    # version breaks ties: two plans can share a generated_at second, and the
+    # newest (highest version) must always sort first
+    state["plans"].sort(key=lambda p: (p["generated_at"], p.get("version", 0)), reverse=True)
     state["runs"].sort(key=lambda r: r["started_at"], reverse=True)
     state["events"].sort(key=lambda e: e["received_at"], reverse=True)
     state["emails"].sort(key=lambda e: e["created_at"], reverse=True)
