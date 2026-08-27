@@ -105,7 +105,7 @@ def build_state() -> dict:
         "id": "meta",
         "now": T(0, "06:30"),          # frozen port clock
         "plan_date": date.today().isoformat(),
-        "port_name": "Alat Freight Terminal",
+        "port_name": "Port Operations Dispatch Agent",
         "manual_baseline_min": 45,
     }]
 
