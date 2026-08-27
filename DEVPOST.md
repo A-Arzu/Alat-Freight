@@ -151,19 +151,22 @@ credentials are needed; set `PLANNER=gemini` with Vertex AI credentials for the 
 fallback, produced the plan.
 
 **Tests:** `python test_pipeline.py`, `test_scenarios.py`, `test_email.py`, `test_hardening.py`,
-`test_adk_wiring.py`.
+`test_gemma.py`, `test_adk_wiring.py`.
 
 ## Which Google SDK did you use?
 
 **Agent Development Kit (ADK)** — plus the Google GenAI SDK underneath it for Vertex AI access.
 
-## Additional Google AI models (bonus)
+## Additional Google AI models
 
-**Gemma** — an opt-in second-model audit (`ENABLE_GEMMA_AUDIT=true`). After Gemini produces a plan,
-Gemma independently reviews the same shipments and flags any assignment it would have decided
-differently; flagged assignments get their confidence lowered and Gemma's dissent attached to the
-reason. It's advisory (it can never break a hard constraint) and degrades to a clean no-op if the
-model isn't reachable — a genuine two-model verification pattern rather than a token integration.
+**Gemma second-model audit — implemented, opt-in, off in the submitted deployment.** The system
+includes a Gemma cross-check (`agent/gemma_audit.py`, tested in `test_gemma.py`): with
+`ENABLE_GEMMA_AUDIT=true` and a Gemini API key, Gemma independently reviews Gemini's plan and flags
+any assignment it would have decided differently, lowering that assignment's confidence and attaching
+its dissent to the reason. It's advisory only (it can never break a hard constraint) and degrades to
+a clean no-op if the model isn't reachable. We left it **disabled** in the judged deployment so the
+demo runs on a single, clearly-labelled model — but the two-model verification pattern is built in
+and reproducible.
 
 ## Which Google Cloud services did you use?
 
