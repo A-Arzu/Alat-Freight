@@ -230,6 +230,7 @@ Cost guard: everything scales to zero when idle; a full Gemini planning run cost
 | `EMAIL_TO` | unset | *Optional* fallback recipient — normally chosen in the dashboard at runtime |
 | `ENABLE_GEMMA_AUDIT` | `false` | Opt-in second-model (Gemma) plan audit |
 | `GEMMA_MODEL` | `gemma-3-27b-it` | Which Gemma model performs the cross-check |
+| `GEMMA_API_KEY` | unset | A free [Gemini API key](https://aistudio.google.com/apikey) — the simplest way to reach Gemma (it serves the `gemma-*` models directly), even while the planner runs on Vertex |
 
 ## Data & scenarios
 

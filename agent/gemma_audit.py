@@ -30,6 +30,17 @@ def _model_name() -> str:
     return os.environ.get("GEMMA_MODEL", "gemma-3-27b-it")
 
 
+def _client(genai):
+    """Prefer the Gemini API for Gemma (it serves the gemma-* models directly);
+    fall back to whatever the ambient config is (e.g. Vertex) otherwise. A
+    dedicated GEMMA_API_KEY lets the auditor use the Gemini API even when the
+    primary planner runs on Vertex."""
+    api_key = os.environ.get("GEMMA_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if api_key:
+        return genai.Client(api_key=api_key, vertexai=False)
+    return genai.Client()
+
+
 def enabled() -> bool:
     return os.environ.get("ENABLE_GEMMA_AUDIT", "").lower() in ("1", "true", "yes")
 
@@ -66,7 +77,7 @@ def audit(plan: dict, scope: list[dict], state: dict, emit) -> dict:
     ships_by_id = {s["id"]: s for s in state.get("ships", [])}
     model = _model_name()
     try:
-        client = genai.Client()
+        client = _client(genai)
         resp = client.models.generate_content(
             model=model,
             contents=f"{AUDIT_PROMPT}\n\nPLAN:\n{_payload(plan, scope, customers, ships_by_id)}",
