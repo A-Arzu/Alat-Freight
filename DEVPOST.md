@@ -157,6 +157,14 @@ fallback, produced the plan.
 
 **Agent Development Kit (ADK)** — plus the Google GenAI SDK underneath it for Vertex AI access.
 
+## Additional Google AI models (bonus)
+
+**Gemma** — an opt-in second-model audit (`ENABLE_GEMMA_AUDIT=true`). After Gemini produces a plan,
+Gemma independently reviews the same shipments and flags any assignment it would have decided
+differently; flagged assignments get their confidence lowered and Gemma's dissent attached to the
+reason. It's advisory (it can never break a hard constraint) and degrades to a clean no-op if the
+model isn't reachable — a genuine two-model verification pattern rather than a token integration.
+
 ## Which Google Cloud services did you use?
 
 Cloud Run · Vertex AI · Firestore · Cloud Scheduler · Secret Manager · Cloud Logging ·

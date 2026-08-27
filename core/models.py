@@ -35,6 +35,7 @@ class Assignment(BaseModel):
     reason: str
     status: str = "planned"    # planned | completed | at_risk
     change: str = "new"        # new | unchanged | moved | retimed | completed
+    gemma: Optional[str] = None  # None | concurred | flagged (second-model audit)
 
 
 class Hold(BaseModel):
@@ -55,6 +56,7 @@ class DispatchPlan(BaseModel):
     generated_at: str
     trigger: str               # schedule | manual | event:<type>
     planner: str               # e.g. "gemini-3.5-flash via Google ADK" | "deterministic heuristic"
+    auditor: Optional[str] = None  # e.g. "gemma-3-27b-it (Gemma)" when the cross-check ran
     assignments: list[Assignment]
     holds: list[Hold] = []
     summary: dict = {}

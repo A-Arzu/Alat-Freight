@@ -14,6 +14,12 @@ Built for the **All Things Agentic Hackathon** (Taskmaster track).
 No login. Press **Run agent**, then **Inject disruption → Wagon W003 breakdown**.
 Submission answers: [DEVPOST.md](DEVPOST.md) · Video shot list: [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)
 
+![Dashboard — a Gemini-planned dispatch, 11 loads at 100% SLA in 62 s](docs/dashboard.png)
+
+*The live control tower: Gemini 3.5 Flash (via Google ADK) plans 11 loads at 100% SLA in 62 seconds,
+with a reason and confidence on every assignment, while the agent's tool calls and reasoning stream on
+the right. Below — the system architecture.*
+
 ![Architecture](docs/architecture.png)
 
 ---
@@ -72,6 +78,7 @@ The design principle — **who does what**:
 | **`submit_plan` tool** | The only door out | Illegal plans bounce back with named violations and the agent self-corrects, bounded by the 150 s planner timeout (`PLANNER_TIMEOUT_S`). |
 | **`get_dispatcher_history` tool** | Memory | Recent approve/override decisions — including the reason a dispatcher typed — so the agent can lower confidence on a pairing a human previously rejected and say so. |
 | **Automatic fallback** | Demo resilience | If Vertex AI is unreachable, a deterministic heuristic runs the same tools; the UI labels it honestly (`PLANNER: FALLBACK`). |
+| **Gemma cross-check** (opt-in) | Second-model audit | With `ENABLE_GEMMA_AUDIT=true`, **Gemma** — a second, independent Google model — reviews Gemini's plan and flags any assignment it would decide differently; flagged assignments get lower confidence and Gemma's dissent in their reason. Advisory only: it can't break a hard constraint, and degrades to a clean no-op if unreachable. |
 | **Human dispatcher** | Approve / override | Confidence scores and rebookings are flagged; decisions accumulate in `outcomes`. |
 
 <details>
@@ -153,6 +160,7 @@ python test_pipeline.py     # full story arc + assertions
 python test_scenarios.py    # all three disruption scenarios
 python test_email.py        # recipient validation, precedence, SMTP send/failure paths
 python test_hardening.py    # stalled runs, plan-id collisions, store parity, re-run integrity
+python test_gemma.py        # second-model audit: parsing, annotation, gating, graceful failure
 python test_adk_wiring.py   # ADK agent/tool construction (pip install google-adk)
 ```
 
@@ -220,6 +228,8 @@ Cost guard: everything scales to zero when idle; a full Gemini planning run cost
 | `TRACE_DELAY_MS` | `300` | Pacing of trace steps for the live UI |
 | `SMTP_HOST/PORT/USER/PASS` | unset | Mail transport (`email_setup.sh` configures this; 465 = SSL, 587 = STARTTLS) |
 | `EMAIL_TO` | unset | *Optional* fallback recipient — normally chosen in the dashboard at runtime |
+| `ENABLE_GEMMA_AUDIT` | `false` | Opt-in second-model (Gemma) plan audit |
+| `GEMMA_MODEL` | `gemma-3-27b-it` | Which Gemma model performs the cross-check |
 
 ## Data & scenarios
 

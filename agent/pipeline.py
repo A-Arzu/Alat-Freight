@@ -224,6 +224,18 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
         fresh = mock_planner.plan(scope, state, emit, fixed_slots=kept)
     store.update("runs", run_id, {"planner": fresh["planner"]})
 
+    # ---- optional second-model audit (Gemma) -----------------------------
+    # Advisory only: annotates confidence where a second Google model dissents.
+    # Opt-in and self-healing, so it can never break the primary plan.
+    from agent import gemma_audit
+    if gemma_audit.enabled():
+        try:
+            audit_result = gemma_audit.audit(fresh, scope, state, emit)
+            if audit_result.get("ran"):
+                fresh["auditor"] = f"{audit_result['model']} (Gemma)"
+        except Exception as exc:
+            emit("reason", "Gemma audit error", str(exc)[:160])
+
     # ---- validate (fresh, future-dated assignments only) -----------------
     shipments_by_id = {s["id"]: s for s in shipments}
     wagons_by_id = {w["id"]: w for w in store.all("wagons")}
@@ -276,7 +288,8 @@ def _execute(store, run_id, trigger, scenario_key, emit, t0):
         parent_id=old_plan["id"] if old_plan else None,
         plan_date=meta["plan_date"], generated_at=_now_iso(),
         trigger=trigger if not scenario_key else f"event:{scenario_key}",
-        planner=fresh["planner"], assignments=all_assignments, holds=all_holds,
+        planner=fresh["planner"], auditor=fresh.get("auditor"),
+        assignments=all_assignments, holds=all_holds,
         summary=summary, diff=diff, status="pending",
     ).model_dump()
 

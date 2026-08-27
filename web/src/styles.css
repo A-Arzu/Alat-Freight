@@ -265,6 +265,13 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent
 .badge.overridden { color: var(--crit); border-color: #4d2323; background: var(--crit-soft); }
 .badge.superseded { color: var(--faint); }
 .badge.v { color: var(--cyan); border-color: #1c4655; background: var(--cyan-soft); }
+.badge.audit { color: #b9c8ff; border-color: #33406b; background: rgba(120, 140, 255, 0.12); }
+
+.gemma-tag {
+  font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 4px;
+}
+.gemma-tag.flagged { color: var(--warn); background: var(--warn-soft); }
 
 /* ---------- plan board ---------- */
 .plan-list { display: grid; gap: 9px; }

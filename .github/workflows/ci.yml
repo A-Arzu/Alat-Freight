@@ -25,6 +25,8 @@ jobs:
         run: python test_email.py
       - name: Hardening regressions
         run: python test_hardening.py
+      - name: Gemma second-model audit (mocked)
+        run: python test_gemma.py
       - name: API smoke test
         run: |
           STORE=memory PLANNER=mock TRACE_DELAY_MS=0 RUN_TOKEN=ci-token \

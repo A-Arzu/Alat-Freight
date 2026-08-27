@@ -18,6 +18,11 @@ export default function PlanBoard({ plan, shipments, onDecide }) {
         <h2>Dispatch plan</h2>
         {plan && <span className="badge v">v{plan.version}</span>}
         {plan && <span className={`badge ${plan.status}`}>{plan.status}</span>}
+        {plan?.auditor && (
+          <span className="badge audit" title={`Cross-checked by a second Google model: ${plan.auditor}`}>
+            ✓ Gemma cross-checked
+          </span>
+        )}
         <div className="spacer" />
         {plan && plan.status === 'pending' && !overriding && (
           <>
@@ -79,6 +84,11 @@ export default function PlanBoard({ plan, shipments, onDecide }) {
                         <span className={`chg ${a.change}`}>
                           {a.change === 'completed' ? '✓ loaded' : a.change}
                         </span>
+                        {a.gemma === 'flagged' && (
+                          <span className="gemma-tag flagged" title="A second Google model (Gemma) would have chosen differently — confidence lowered">
+                            ⚑ Gemma
+                          </span>
+                        )}
                       </div>
                       <div className="reason" title={a.reason}>{a.reason}</div>
                     </div>
